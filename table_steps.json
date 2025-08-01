@@ -1,0 +1,203 @@
+{
+  "processing": {
+    "pre_processing": [
+      {
+        "name": "Normalize",
+        "description": "Normalizes the numeric columns to have a mean of 0 and standard deviation of 1.",
+        "options": []
+      },
+      {
+        "name": "Scale",
+        "description": "Scales the numeric columns to a specified range.",
+        "options": [
+          {
+            "name": "min_value",
+            "value": 0,
+            "data_type": "int",
+            "description": "Minimum value after scaling.",
+            "options": [0, 1]
+          },
+          {
+            "name": "max_value",
+            "value": 1,
+            "data_type": "int",
+            "description": "Maximum value after scaling.",
+            "options": [1, 10]
+          }
+        ]
+      },
+      {
+        "name": "Impute Missing Values",
+        "description": "Imputes missing values using various strategies.",
+        "options": [
+          {
+            "name": "strategy",
+            "value": "mean",
+            "data_type": "str",
+            "description": "The strategy for imputing missing values.",
+            "options": ["mean", "median", "most_frequent", "constant"]
+          },
+          {
+            "name": "fill_value",
+            "value": 0,
+            "data_type": "float",
+            "description": "The value to replace missing values if the 'constant' strategy is used.",
+            "options": []
+          }
+        ]
+      },
+      {
+        "name": "One-Hot Encoding",
+        "description": "Converts categorical columns to one-hot encoded format.",
+        "options": []
+      },
+      {
+        "name": "Binarize",
+        "description": "Binarizes numeric data according to a threshold.",
+        "options": [
+          {
+            "name": "threshold",
+            "value": 0.0,
+            "data_type": "float",
+            "description": "The threshold value to binarize the data.",
+            "options": [0.0, 1.0]
+          }
+        ]
+      },
+      {
+        "name": "Remove Outliers",
+        "description": "Removes outliers from numeric data based on the IQR (Interquartile Range).",
+        "options": [
+          {
+            "name": "iqr_multiplier",
+            "value": 1.5,
+            "data_type": "float",
+            "description": "Multiplier for the IQR to define outlier cutoff.",
+            "options": [1.5, 3.0]
+          }
+        ]
+      },
+      {
+        "name": "Remove Columns with Excessive NaNs",
+        "description": "Removes columns that have a percentage of NaN values exceeding a specified threshold.",
+        "options": [
+          {
+            "name": "nan_threshold",
+            "value": 0.5,
+            "data_type": "float",
+            "description": "The percentage threshold of NaN values for column removal.",
+            "options": [0.1, 0.3, 0.5, 0.7, 0.9]
+          }
+        ]
+      },
+      {
+        "name": "Remove Rows with Excessive NaNs",
+        "description": "Removes rows that have a percentage of NaN values exceeding a specified threshold.",
+        "options": [
+          {
+            "name": "nan_threshold",
+            "value": 0.5,
+            "data_type": "float",
+            "description": "The percentage threshold of NaN values for row removal.",
+            "options": [0.1, 0.3, 0.5, 0.7, 0.9]
+          }
+        ]
+      }
+    ],
+    "data_augmentation": [
+      {
+        "name": "SMOTE",
+        "description": "Applies SMOTE (Synthetic Minority Over-sampling Technique) to balance the classes.",
+        "options": [
+          {
+            "name": "target_column",
+            "value": null,
+            "data_type": "select",
+            "description": "Select the target column (must be categorical).",
+            "options": []
+          },
+          {
+            "name": "sampling_strategy",
+            "value": "auto",
+            "data_type": "str",
+            "description": "Strategy for sampling: how much to over-sample the minority class.",
+            "options": ["auto", "minority", "not majority", "not minority", "all"]
+          },
+          {
+            "name": "k_neighbors",
+            "value": 5,
+            "data_type": "int",
+            "description": "Number of nearest neighbors to use for SMOTE.",
+            "options": [3, 5, 10]
+          }
+        ]
+      },
+      {
+        "name": "Dataset Multiplier",
+        "description": "Applies the augmentation of data on the basis of the factor applied to the dataset",
+        "options": [
+          {
+            "name": "size_multiplier",
+            "value": "1x",
+            "data_type": "int",
+            "description": "Strategy for sampling: factor by which the dataset will be augmented.",
+            "options": ["1x", "2x", "3x", "4x", "5x"]
+          }
+        ]
+      },
+      {
+        "name": "Add Noise",
+        "description": "Adds random noise to the numeric data.",
+        "options": [
+          {
+            "name": "noise_factor",
+            "value": 0.1,
+            "data_type": "float",
+            "description": "The factor of the noise to be added to numeric columns.",
+            "options": [0.1, 0.2, 0.3]
+          }
+        ]
+      },
+      {
+        "name": "Oversample",
+        "description": "Oversamples the minority class by replicating existing instances.",
+        "options": [
+          {
+            "name": "target_column",
+            "value": null,
+            "data_type": "select",
+            "description": "Select the target column (must be categorical).",
+            "options": []
+          },
+          {
+            "name": "sampling_strategy",
+            "value": "minority",
+            "data_type": "str",
+            "description": "The sampling strategy: which class to oversample.",
+            "options": ["minority", "not majority", "all"]
+          }
+        ]
+      },
+      {
+        "name": "Undersample",
+        "description": "Undersamples the majority class to balance the dataset.",
+        "options": [
+          {
+            "name": "target_column",
+            "value": null,
+            "data_type": "select",
+            "description": "Select the target column (must be categorical).",
+            "options": []
+          },
+          {
+            "name": "sampling_strategy",
+            "value": "majority",
+            "data_type": "str",
+            "description": "The sampling strategy: which class to undersample.",
+            "options": ["majority", "not minority", "all"]
+          }
+        ]
+      } 
+    ]
+  }
+}
