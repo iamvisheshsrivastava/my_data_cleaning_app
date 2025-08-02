@@ -1,30 +1,41 @@
 import pandas as pd
+import numpy as np
 import re
 import json
+import io
+import base64
+import time
+import datetime as dt
 from datetime import datetime
-import numpy as np
-from together import Together
-import json
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from typing import Tuple
-import pandas as pd
+from together import Together
+
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, Binarizer
+
 from imblearn.over_sampling import SMOTE, RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
-import pandas as pd
-import numpy as np
-import re
-import json
-from datetime import datetime
+
 import nltk
-from geopy.distance import geodesic
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
-import tldextract
-from llm_utils import load_deepseek_model, generate_response
 
-nltk.download("stopwords")
-english_stops = set(stopwords.words("english"))
+from geopy.distance import geodesic
+import tldextract
+
+import dateparser
+from dateparser.search import search_dates
+
+from joblib import Parallel, delayed
+
+import contextlib
+
+
+#nltk.download("stopwords")
+#english_stops = set(stopwords.words("english"))
 
 ml_friendly_types = [
     "Numerical",
@@ -40,109 +51,160 @@ ml_friendly_types = [
     "Image URL"
 ]
 
-def infer_column_type(col: pd.Series) -> str:
-    col_str = col.dropna().astype(str).str.strip()
-    unique_ratio = col.nunique(dropna=True) / max(len(col), 1)
-    null_ratio = col.isna().sum() / max(len(col), 1)
-    sample = col_str.sample(min(100, len(col_str)), random_state=42)
+try:
+    import filetype      
+except ImportError:
+    filetype = None        
 
-    # 1. Null-heavy
-    if null_ratio > 0.8:
-        return "Null-heavy"
+_RE_IMAGE_URL  = re.compile(r'https?://[^\s]+\.(?:jpe?g|png|gif)(?:\?.*)?$', re.I)
+_RE_BASE64_IMG = re.compile(r'^data:image\/[^;]+;base64,\s*', re.I)   # allow whitespace
+_RE_VIDEO_URL  = re.compile(r'(youtu\.be/|youtube\.com/(watch\?v=|embed/)|\.(mp4|mov|avi|webm)(\?.*)?$)', re.I)
+_RE_DOC_URL    = re.compile(r'https?://[^\s]+\.(?:pdf|docx?|xlsx?|csv)(?:\?.*)?$', re.I)
+_RE_URL        = re.compile(r'https?://', re.I)
+_RE_FILE_PATH  = re.compile(r'^[a-zA-Z]:\\|^(\/[^\/ ]+)+\/[^\/ ]+\.\w+$')
+_RE_GPS        = re.compile(r'^-?\d{1,3}\.\d+[,;\s]\s*-?\d{1,3}\.\d+$')
+_RE_EMAIL      = re.compile(r'^[\w\.-]+@[\w\.-]+\.\w+$')
+_RE_PHONE      = re.compile(r'^\+?\d[\d\s\-]{7,}$')
+_RE_PERCENT    = re.compile(r'^\d+(\.\d+)?%$')
+_RE_HEX_COLOR  = re.compile(r'^#(?:[A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$')
+_RE_RGB_COLOR  = re.compile(r'^rgb\(')
 
-    # 2. Constant / Low Variance
-    if col.nunique(dropna=True) <= 1:
-        return "Constant / Low Variance"
+BOOL_SET = {"true", "false", "0", "1"}
 
-    # 3. Image URL
-    if sample.str.contains(r'https?://.*\.(jpg|jpeg|png|gif)$', case=False).mean() > 0.5:
-        return "Image URL"
+def _is_binary_image(val) -> bool:
+    """Detect raw byte streams OR base-64 encoded images."""
+    if filetype is None or pd.isna(val):
+        return False
+    try:
+        if isinstance(val, (bytes, bytearray, memoryview)):
+            return filetype.is_image(val)
+        if isinstance(val, str) and _RE_BASE64_IMG.match(val):
+            _, b64 = val.split(',', 1)
+            return filetype.is_image(base64.b64decode(b64[:80]))
+    except Exception:
+        pass
+    return False
 
-    # 4. Video URL (YouTube or direct links)
-    youtube_pattern = r"(youtu\.be/|youtube\.com/(watch\?v=|embed/))"
-    video_file_pattern = r"\.(mp4|mov|avi|webm)$"
+def _date_success_ratio(series: pd.Series, sample_n: int = 60) -> float:
+    if series.empty:
+        return 0.0
 
-    if sample.str.contains(youtube_pattern, case=False).mean() > 0.5 or \
-    sample.str.contains(video_file_pattern, case=False).mean() > 0.5:
-        return "Video URL"
+    sample   = series.dropna().sample(min(sample_n, len(series)), random_state=42)
+    fast     = pd.to_datetime(sample, errors="coerce", infer_datetime_format=True)
+    fast_ok  = fast.notna()
 
-    # 5. Document URL
-    if sample.str.contains(r'https?://.*\.(pdf|docx?|xlsx?|csv)$', case=False).mean() > 0.5:
-        return "Document URL"
+    slow_needed = sample[~fast_ok]
+    if slow_needed.empty:
+        return 1.0
 
-    # 6. General URL
-    if sample.str.contains(r'https?://', case=False).mean() > 0.5:
-        return "General URL"
+    slow_ok = slow_needed.apply(lambda x: dateparser.parse(str(x)) is not None
+                                or bool(search_dates(str(x))))
+    return (fast_ok.sum() + slow_ok.sum()) / len(sample)
 
-    # 7. File Path
-    if sample.str.contains(r'([a-zA-Z]:\\|/).*\.\w+$').mean() > 0.5:
-        return "File Path"
 
-    # 8. GPS Coordinates
-    if sample.str.contains(r'^-?\d{1,3}\.\d+,\s*-?\d{1,3}\.\d+$').mean() > 0.5:
-        return "GPS Coordinates"
+def infer_column_type(col: pd.Series,
+                      thresh: float = 0.5,
+                      sample_size: int = 100) -> str:
+    """
+    Fast, dtype-aware heuristic that covers all types you had:
+    - Image Bytes (base64/raw) | Image/Video/Document/General URL | File Path
+    - GPS | Email | Phone | Percentage | Currency | Color Code | JSON/Nested
+    - Numerical | Datetime (robust) | Boolean (incl. string booleans)
+    - Identifier/ID | Categorical | Ordinal | Duration | Mixed/Ambiguous | Text
+    Heavy checks are sampled; numeric/datetime/bool dtypes exit early.
+    """
 
-    # 9. Email Address
-    if sample.str.contains(r'^[\w\.-]+@[\w\.-]+\.\w+$').mean() > 0.5:
-        return "Email Address"
-
-    # 10. Phone Number
-    if sample.str.contains(r'^\+?\d[\d\s\-]{7,}$').mean() > 0.5:
-        return "Phone Number"
-
-    # 11. Currency
-    if sample.str.contains(r'^[$€₹]\s?\d+', case=False).mean() > 0.5:
-        return "Currency"
-
-    # 12. Percentage
-    if sample.str.contains(r'^\d+(\.\d+)?%$').mean() > 0.5:
-        return "Percentage"
-
-    # 13. Color Code
-    if sample.str.contains(r'^(#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})|rgb\()').mean() > 0.5:
-        return "Color Code"
-
-    # 14. JSON / Nested
-    if sample.str.startswith("{").mean() > 0.5:
-        return "JSON / Nested"
-    
-    # 15. Numerical
+    if pd.api.types.is_bool_dtype(col):
+        return "Boolean"
     if pd.api.types.is_numeric_dtype(col):
         return "Numerical"
-
-    # 16. Datetime
-    dt_valid = pd.to_datetime(col, errors='coerce')
-    if dt_valid.notna().sum() / max(len(col), 1) > 0.7:
+    if pd.api.types.is_datetime64_any_dtype(col):
         return "Datetime"
 
-    # 17. Boolean
-    if sample.isin(["True", "False", "true", "false", "0", "1"]).mean() > 0.8:
+    non_null = col.dropna()
+    if non_null.empty:
+        return "Null-heavy"
+
+    raw_sample = non_null.sample(min(sample_size, len(non_null)),  
+                                random_state=42)
+
+    sample = raw_sample.astype(str).str.strip()                   
+    avg_len = sample.str.len().mean()
+    has_digits = sample.str.contains(r"\d").mean()  
+
+    is_plausible_date = (avg_len < 40) and (has_digits > 0.3)  
+
+
+    null_ratio   = col.isna().mean()
+    if null_ratio > 0.80:
+        return "Null-heavy"
+
+    nunique = col.nunique(dropna=True)
+    if nunique <= 1:
+        return "Constant / Low Variance"
+
+    # 1) Image bytes / base-64 
+    if sample.str.contains("data:image", regex=False).any() or sample.apply(lambda x: isinstance(x, (bytes, bytearray))).any():
+        if sample.apply(_is_binary_image).mean() > thresh:
+            return "Image Bytes"
+
+    # 2) URL / path-like detectors
+    if sample.str.match(_RE_IMAGE_URL).mean() > thresh:  return "Image URL"
+    if sample.str.match(_RE_VIDEO_URL).mean() > thresh:  return "Video URL"
+    if sample.str.match(_RE_DOC_URL).mean()   > thresh:  return "Document URL"
+    if sample.str.match(_RE_URL).mean()       > thresh:  return "General URL"
+    if sample.str.match(_RE_FILE_PATH).mean() > thresh:  return "File Path"
+
+    # 3) Structured text detectors
+    if sample.str.match(_RE_GPS).mean()     > thresh:  return "GPS Coordinates"
+    if sample.str.match(_RE_EMAIL).mean()   > thresh:  return "Email Address"
+    if sample.str.match(_RE_PHONE).mean()   > thresh:  return "Phone Number"
+    if sample.str.match(_RE_PERCENT).mean() > thresh:  return "Percentage"
+    if sample.str.contains(r'(?:USD|EUR|GBP|INR|[$€£₹])\s?\d', case=False).mean() > thresh:
+        return "Currency"
+
+    # Color codes
+    if (sample.str.match(_RE_HEX_COLOR) | sample.str.match(_RE_RGB_COLOR)).mean() > thresh:
+        return "Color Code"
+
+    # JSON / Nested ( objects and arrays)
+    if (sample.str.startswith("{") | sample.str.startswith("[")).mean() > thresh:
+        return "JSON / Nested"
+
+    # 4) Datetime
+    if is_plausible_date and _date_success_ratio(col) > 0.70:
+        return "Datetime"
+
+    # 5) Boolean-from-strings (object dtype)
+    if nunique <= 2 and sample.str.lower().isin(BOOL_SET).mean() > 0.90:
         return "Boolean"
 
-    # 18. Identifier / ID
-    if col.nunique(dropna=True) == len(col.dropna()):
+    # 6) Identifier / ID (all unique non-null)
+    if nunique == len(non_null):
         return "Identifier / ID"
 
-    # 19. Categorical
-    if unique_ratio < 0.05 and col.dtype == object:
+    # 7) Categorical (low cardinality ratio)
+    unique_ratio = nunique / max(len(col), 1)
+    if unique_ratio < 0.05:
         return "Categorical"
 
-    # 20. Ordinal (simple heuristic)
-    known_ordinals = ["low", "medium", "high", "rare", "common", "excellent", "poor"]
-    if sample.str.lower().isin(known_ordinals).mean() > 0.5:
+    # 8) Ordinal (keyword heuristic)
+    known_ordinals = {"low", "medium", "high", "rare", "common", "excellent", "poor"}
+    if sample.str.lower().isin(known_ordinals).mean() > thresh:
         return "Ordinal"
 
-    # 21. Duration
-    if sample.str.contains(r'^\d+:\d{2}(:\d{2})?$').mean() > 0.5:
+    # 9) Duration HH:MM[:SS]
+    if sample.str.match(r'^\d+:\d{2}(?::\d{2})?$').mean() > thresh:
         return "Duration / Timedelta"
 
-    # 22. Mixed / Ambiguous
-    type_set = set(type(v).__name__ for v in col.dropna().sample(min(20, len(col))))
+    # 10) Mixed / Ambiguous (heterogeneous Python types in raw sample)
+    type_set = {type(x).__name__ for x in raw_sample}
     if len(type_set) > 1:
         return "Mixed / Ambiguous"
 
-    # 23. Text (fallback)
+    # Fallback
     return "Text"
+
 
 def get_cleaning_and_enrichment_suggestions(df: pd.DataFrame) -> dict:
     column_details = []
@@ -197,63 +259,25 @@ def get_cleaning_and_enrichment_suggestions(df: pd.DataFrame) -> dict:
         return {}
 
 
-def get_pipeline_score(series, col_type):
-    total = len(series)
-    missing_pct = series.isna().mean() * 100
-    n_unique = series.nunique()
-    unique_pct = (n_unique / total) * 100 if total > 0 else 0
-    description = f"{missing_pct:.1f}% missing | {unique_pct:.1f}% unique"
+def quick_pipeline_score(col_type, miss_pct, uniq_pct, series, top_vals):
+    desc = f"{miss_pct:.1f}% missing | {uniq_pct:.1f}% unique"
 
-    if col_type in ["Numerical", "Boolean", "Percentage", "Currency"]:
-        min_val = pd.to_numeric(series, errors="coerce").min()
-        max_val = pd.to_numeric(series, errors="coerce").max()
-        if missing_pct < 5:
-            return f"⭐⭐⭐⭐⭐ — Clean numeric ({description} | Min: {min_val}, Max: {max_val})"
-        else:
-            return f"⭐⭐⭐ — Numeric column with moderate issues ({description})"
+    if col_type == "Numerical":
+        if miss_pct < 5: return f"⭐⭐⭐⭐⭐ — Numeric ({desc})"
+        return f"⭐⭐⭐ — Numeric issues ({desc})"
 
-    if col_type in ["Categorical", "Ordinal"]:
-        top_vals = series.value_counts().head(2).to_dict()
+    if col_type in ("Categorical", "Ordinal"):
         example = ', '.join([f"{k} ({v})" for k, v in top_vals.items()])
-        if n_unique <= 20 and missing_pct < 10:
-            return f"⭐⭐⭐⭐ — Low-cardinality categorical ({description} | Top: {example})"
-        elif n_unique <= 50 and missing_pct < 20:
-            return f"⭐⭐⭐ — Medium-cardinality categorical ({description} | Top: {example})"
-        else:
-            return f"⭐⭐ — High-cardinality ({description} | Top: {example})"
-
-    if col_type == "Text":
-        lengths = series.dropna().astype(str).apply(len)
-        avg_len = lengths.mean()
-        return f"⭐⭐⭐ — Text column ({description} | Avg length: {avg_len:.1f} chars)"
+        if uniq_pct < 5:  return f"⭐⭐⭐⭐ — Low-card ({desc} | {example})"
+        return f"⭐⭐⭐ — Categorical ({desc} | {example})"
 
     if col_type == "Datetime":
-        dt_valid = pd.to_datetime(series, errors="coerce")
-        if dt_valid.notna().sum() > 0:
-            range_info = f" | Range: {dt_valid.min().date()} to {dt_valid.max().date()}"
-        else:
-            range_info = ""
-        return f"⭐⭐⭐ — Datetime column ({description}{range_info})"
-
-    if col_type == "Duration / Timedelta":
-        time_series = pd.to_timedelta(series, errors="coerce")
-        if time_series.notna().sum() > 0:
-            range_info = f" | Range: {time_series.min()} to {time_series.max()}"
-        else:
-            range_info = ""
-        return f"⭐⭐⭐ — Duration data ({description}{range_info})"
-
-    if col_type == "GPS Coordinates":
-        return f"⭐⭐⭐ — Location data ({description})"
-
-    if col_type == "Image URL":
-        pct_valid = series.dropna().str.contains(r'\.(jpg|jpeg|png|gif)$', case=False).mean() * 100
-        return f"⭐⭐⭐ — Image references ({description} | {pct_valid:.1f}% valid image URLs)"
-
-    if missing_pct > 70:
-        return f"⭐ — Too many missing values ({missing_pct:.1f}%)"
-
-    return f"⭐ — Unsupported or unclear type ({description})"
+        return f"⭐⭐⭐ — Datetime ({desc})"
+    if col_type == "Boolean":
+        return f"⭐⭐⭐⭐ — Boolean ({desc})"
+    if miss_pct > 70:
+        return f"⭐ — Too many missing ({miss_pct:.1f}%)"
+    return f"⭐ — Other ({desc})"
 
 def get_viz_capability(col_type: str, col_name: str = "") -> str:
     """
@@ -287,44 +311,51 @@ def get_viz_capability(col_type: str, col_name: str = "") -> str:
 
     return "❌"
 
-def analyze_dataframe(df):
-    metadata = []
-    response = "—"
-    try:
-        tokenizer, model = load_deepseek_model()
-        response = generate_response("Print hello world in Python", tokenizer, model)        
-        #suggestions = get_cleaning_and_enrichment_suggestions(df)
-        
-        #cleaning_map = suggestions.get("cleaning", {})
-        #enrichment_map = suggestions.get("enrichment", {})
-    except Exception as e:
-        print("Error parsing LLM JSON response:", e)
-        cleaning_map = {}
-        enrichment_map = {}
 
-    for col in df.columns:
-        series = df[col]
+def analyze_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    missing_pct = df.isna().mean() * 100
+    nunique     = df.nunique(dropna=True)
+    total_rows  = len(df)
+
+    def process_column(col_name: str) -> dict:
+        series     = df[col_name]
+        col_start  = time.perf_counter()          
+
+        t0 = time.perf_counter()
         col_type = infer_column_type(series)
-        usable_for_ml = col_type in ml_friendly_types
-        usable_for_viz = get_viz_capability(col_type, col)
-        ml_readiness = get_pipeline_score(series, col_type) if usable_for_ml else "—"
+        infer_ms = (time.perf_counter() - t0) * 1_000
 
-        metadata.append({
-            "Column": col,
+        miss      = missing_pct[col_name]
+        uniq      = nunique[col_name]
+        uniq_pct  = (uniq / total_rows) * 100 if total_rows else 0
+        usable_ml = col_type in ml_friendly_types
+        usable_vz = get_viz_capability(col_type, col_name)
+
+        if col_type in ("Categorical", "Ordinal"):
+            top_vals = series.dropna().head(500).value_counts().head(2).to_dict()
+        else:
+            top_vals = {}
+
+        t0 = time.perf_counter()
+        ml_ready = quick_pipeline_score(col_type, miss, uniq_pct, series, top_vals)
+        score_ms = (time.perf_counter() - t0) * 1_000
+
+        total_ms = (time.perf_counter() - col_start) * 1_000
+        print(f"[TIMING] {col_name:<20} infer={infer_ms:6.1f} ms | score={score_ms:6.1f} ms | total={total_ms:6.1f} ms")
+
+        return {
+            "Column": col_name,
             "Inferred Type": col_type,
-            "Usable for ML": "✅" if usable_for_ml else "❌",
-            "ML Readiness": ml_readiness,
-            "Usable for Visualization": usable_for_viz,
-            #"Suggested Improvements": cleaning_map.get(col, "—"),
-            "Cleaning Suggestion": response,
-            #"Enrichment Suggestion": enrichment_map.get(col, "—")       
-        })
+            "Usable for ML": "✅" if usable_ml else "❌",
+            "ML Readiness": ml_ready,
+            "Usable for Visualization": usable_vz,
+            "Elapsed ms": round(total_ms, 1)
+        }
 
-    return pd.DataFrame(metadata)
-
-
-
-
+    results = Parallel(n_jobs=-1, backend="loky")(
+        delayed(process_column)(c) for c in df.columns
+    )
+    return pd.DataFrame(results)
 
 def custom_cleaning_via_llm(user_instruction: str, df: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
     """
@@ -381,7 +412,7 @@ PROMPT LENGTH (characters): {len(user_instruction) + len(formatted_df)}
             "nltk": nltk,
             "geopy": __import__("geopy"),  
             "geodesic": geodesic,
-            "stop_words": english_stops,
+            #"stop_words": english_stops,
             "stops": set(stopwords.words("english")),
             "word_tokenize": word_tokenize,
             "transformers": __import__("transformers"),
@@ -407,20 +438,6 @@ def call_llm(prompt: str, temperature=0.3, max_tokens=700) -> str:
         max_tokens=max_tokens
     )
     return response.choices[0].message.content.strip()
-
-
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-import io
-import contextlib
-import re
-from datetime import datetime
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, Binarizer
-from imblearn.over_sampling import SMOTE, RandomOverSampler
-from imblearn.under_sampling import RandomUnderSampler
 
 def execute_plot_code(code: str, df: pd.DataFrame):
     """

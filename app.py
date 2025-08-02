@@ -1,32 +1,37 @@
-import streamlit as st
-import pandas as pd
+import os
+import re
+import io
+import uuid
 import json
-from pipeline_logic import run_pipeline
-from metadata_inference import analyze_dataframe, custom_cleaning_via_llm, execute_plot_code  
+import tempfile
+import contextlib
+from io import BytesIO
+from uuid import uuid4
+
+import pandas as pd
+import streamlit as st
 import requests
 import replicate
-import os
-from together import Together
-import uuid
-import plotly.express as px
+import dtale
 import matplotlib.pyplot as plt
 import seaborn as sns
+import plotly.express as px
+
+from PIL import Image
+from bs4 import BeautifulSoup
 from wordcloud import WordCloud
-#from custom_components.interactive_table import interactive_table
+
+from together import Together
+from streamlit_agraph import agraph, Config
+import streamlit.components.v1 as components
+
+from pipeline_logic import run_pipeline
+from metadata_inference import analyze_dataframe, custom_cleaning_via_llm, execute_plot_code
 from cleaningDecisionTree import render_pyvis_tree, render_agraph_tree
 from pyvis.network import Network
-import streamlit.components.v1 as components
-import tempfile
-from PIL import Image
-from io import BytesIO
-import re
-from streamlit_agraph import agraph, Config
-from uuid import uuid4
-from bs4 import BeautifulSoup
-import matplotlib.pyplot as plt
-import seaborn as sns
-import io
-import contextlib
+from DB.log_to_db import log_session, log_file, log_event
+from datetime import datetime
+
 
 ########################################################################################
 ############################CSV Cleaning with AI Suggestions############################
@@ -185,7 +190,6 @@ with tab1:
             st.session_state.selected_suggestion = ""
         if "custom_suggestion" not in st.session_state:
             st.session_state.custom_suggestion = ""
-
 
         button_label = "Regenerate Suggestions" if st.session_state.suggested_once else "Get Smart LLM Suggestions"
         if st.button(button_label) and uploaded_file:
@@ -452,16 +456,161 @@ def render_column_visualization(df: pd.DataFrame, col: str, inferred_type: str):
         except Exception as e:
             st.error(f"Error visualizing `{col}`: {str(e)}")
 
+def multi_csv_merge_ui(max_files: int = 5):
+    """
+    Streamlit helper that
+      • lets the user upload up to `max_files` CSVs,
+      • if 1 file   → shows a “Submit” button and stores it as final_df,
+      • if >1 file  → lets the user configure joins and shows a
+                      “Submit and Merge Files” button,
+      • clears st.session_state.final_df when the uploader is emptied.
+    """
+
+    uploaded_files = st.file_uploader(
+        f"Upload up to {max_files} CSV files",
+        type=["csv"],
+        accept_multiple_files=True,
+        key="multi_csv"
+    )
+
+    if not uploaded_files:
+        st.session_state.pop("final_df", None)
+        return
+
+    if len(uploaded_files) > max_files:
+        st.warning(f"Please upload at most {max_files} files.")
+        return
+
+    dataframes  = [pd.read_csv(f) for f in uploaded_files]
+    file_names  = [f.name for f in uploaded_files]
+
+    if len(dataframes) == 1:
+        if st.button("Submit"):
+            st.session_state.final_df = dataframes[0]
+            st.success("File loaded!")
+        return        
+
+    st.subheader("Join configuration")
+    join_config = []
+
+    for i in range(len(dataframes) - 1):
+        st.markdown(f"### Join {i+1}: `{file_names[i]}` ⨝ `{file_names[i+1]}`")
+
+        left_col = st.selectbox(
+            f"Column from **{file_names[i]}**",
+            dataframes[i].columns.tolist(),
+            key=f"left_col_{i}"
+        )
+
+        right_col = st.selectbox(
+            f"Column from **{file_names[i+1]}**",
+            dataframes[i+1].columns.tolist(),
+            key=f"right_col_{i}"
+        )
+
+        join_type = st.selectbox(
+            "Join type",
+            ["inner", "outer", "left", "right"],
+            key=f"join_type_{i}"
+        )
+
+        join_config.append({
+            "left_df": i,
+            "right_df": i + 1,
+            "left_on": left_col,
+            "right_on": right_col,
+            "how": join_type
+        })
+
+    if st.button("Submit and Merge Files"):
+        merged = dataframes[0]
+        for cfg in join_config:
+            merged = pd.merge(
+                merged,
+                dataframes[cfg["right_df"]],
+                how=cfg["how"],
+                left_on=cfg["left_on"],
+                right_on=cfg["right_on"]
+            )
+        st.session_state.final_df = merged
+        st.success("Files successfully merged!")
+
+
+#######################################################
+###################### UI Starts ###################### 
+
+# if "expanded_columns" not in st.session_state:
+#     st.session_state.expanded_columns = set()
+
+# with tab2:
+#     st.header("Metadata Inference & Usability")
+#     multi_csv_merge_ui()
+
+#     if "final_df" in st.session_state:
+#         df = st.session_state.final_df
+
+#         st.subheader("Preview of Uploaded Data")
+#         num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10)
+#         st.dataframe(df.head(num_rows), use_container_width=True)
+
+#         if st.button("🔍 Run Inference on Columns"):
+#             with st.spinner("Inferring column types and suggestions..."):
+#                 st.session_state.metadata_df = analyze_dataframe(df)
+
+#         if "metadata_df" in st.session_state:
+#             metadata_df = st.session_state.metadata_df
+
+#             st.subheader("Column Type Inference")
+#             st.dataframe(metadata_df)
+
+#             st.subheader("Basic Suggested Visualizations")
+#             st.markdown("### Choose columns to visualize")
+            
+#             instance = dtale.show(df, open_browser=False)
+#             d_url = instance._main_url 
+
+#             st.markdown(f"🔗 [Open D-Tale Visualization]({d_url})")
+
+#             selected_cols = st.multiselect(
+#                 "Select columns to show visualizations for",
+#                 options=list(metadata_df["Column"]),
+#                 default=list(metadata_df["Column"])[:0],  
+#                 key="selected_columns"
+#             )
+
+#             for col in selected_cols:
+#                 inferred_type = metadata_df[metadata_df["Column"] == col]["Inferred Type"].values[0]
+#                 render_column_visualization(df, col, inferred_type)
 
 if "expanded_columns" not in st.session_state:
     st.session_state.expanded_columns = set()
 
 with tab2:
     st.header("Metadata Inference & Usability")
-    uploaded_file = st.file_uploader("Upload your CSV for Metadata Analysis", type=["csv"], key="meta")
+    multi_csv_merge_ui()
 
-    if uploaded_file:
-        df = pd.read_csv(uploaded_file)
+    if "final_df" in st.session_state:
+        df = st.session_state.final_df
+
+        # ⏺️ Session setup for logging
+        if "session_id" not in st.session_state:
+            st.session_state.session_id = str(uuid.uuid4())
+
+        log_session(st.session_state.session_id)
+
+        # ⏺️ Save uploaded file to audit directory
+        AUDIT_DIR = r"C:\Users\sriva\Desktop\AICUFLow\my_data_cleaning_app\DB\auditCSVFiles"
+        os.makedirs(AUDIT_DIR, exist_ok=True)
+
+        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        filename = f"uploaded_{timestamp}_{st.session_state.session_id[:8]}.csv"
+        file_path = os.path.join(AUDIT_DIR, filename)
+
+        df.to_csv(file_path, index=False)
+
+        # ⏺️ Log file save and event
+        log_file(st.session_state.session_id, filename, file_path)
+        log_event(st.session_state.session_id, "file_upload", f"Saved CSV to {file_path}")
 
         st.subheader("Preview of Uploaded Data")
         num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10)
@@ -470,6 +619,7 @@ with tab2:
         if st.button("🔍 Run Inference on Columns"):
             with st.spinner("Inferring column types and suggestions..."):
                 st.session_state.metadata_df = analyze_dataframe(df)
+                log_event(st.session_state.session_id, "inference_triggered", "User ran column inference")
 
         if "metadata_df" in st.session_state:
             metadata_df = st.session_state.metadata_df
@@ -479,6 +629,12 @@ with tab2:
 
             st.subheader("Basic Suggested Visualizations")
             st.markdown("### Choose columns to visualize")
+            
+            instance = dtale.show(df, open_browser=False)
+            d_url = instance._main_url 
+
+            st.markdown(f"🔗 [Open D-Tale Visualization]({d_url})")
+
             selected_cols = st.multiselect(
                 "Select columns to show visualizations for",
                 options=list(metadata_df["Column"]),
@@ -489,6 +645,7 @@ with tab2:
             for col in selected_cols:
                 inferred_type = metadata_df[metadata_df["Column"] == col]["Inferred Type"].values[0]
                 render_column_visualization(df, col, inferred_type)
+                log_event(st.session_state.session_id, "column_visualized", f"{col} ({inferred_type})")
 
 ################################### Custom Visualization Via LLM ###################################
             st.subheader("🧪 Custom Visualization via LLM")
@@ -531,7 +688,7 @@ with tab2:
 
 ################################### Custom Cleaning Via LLM ###################################
             if "df" not in st.session_state:
-                st.session_state.df = df.copy()  # Initial load
+                st.session_state.df = df.copy() 
 
             st.markdown("## 🛠️ Custom Cleaning via LLM")
 
@@ -562,63 +719,6 @@ with tab2:
 
 ################################### Decision Tree Visualization ##################################
 
-            # if "show_tree" not in st.session_state:
-            #     st.session_state["show_tree"] = False
-
-            # if "executed_actions" not in st.session_state:
-            #     st.session_state["executed_actions"] = set()
-
-            # if st.button(" Show Interactive Decision Tree for Advanced Cleaning"):
-            #     st.session_state["show_tree"] = not st.session_state["show_tree"]
-            #     st.write(" Toggled tree visibility:", st.session_state["show_tree"])
-
-            # if st.session_state["show_tree"]:
-            #     st.subheader(" Interactive Pyvis Decision Tree")
-
-            #     working_df = st.session_state.df
-            #     col = st.selectbox("Select column for decision tree", working_df.columns)
-
-            #     if col:
-            #         st.write(" Selected column:", col)
-
-            #         response = render_pyvis_tree(working_df, call_llm, col)
-
-            #         if response["status"] == "success":
-            #             components.html(response["html"], height=600, scrolling=True)
-
-            #             st.subheader(" Execute Suggested Cleaning Actions")
-
-            #             # Extract leaves from response
-            #             leaves = response.get("leaves", [])
-            #             st.write(" Leaf actions found:", leaves)
-
-            #             for leaf in leaves:
-            #                 is_executed = leaf in st.session_state["executed_actions"]
-            #                 button_label = f"{'✅' if is_executed else '🔷'} {leaf}"
-
-            #                 st.write(f" Rendering button for leaf: {leaf} | Executed: {is_executed}")
-
-            #                 if st.button(button_label, key=f"{col}_{leaf}"):
-            #                     st.write(f" Button clicked for: {leaf}")
-
-            #                     try:
-            #                         instruction = f"Apply the following action on the column '{col}': {leaf}"
-            #                         cleaned_df, code_str = custom_cleaning_via_llm(instruction, st.session_state.df)
-
-            #                         # Update state with cleaned data
-            #                         st.session_state.df = cleaned_df
-            #                         st.session_state["executed_actions"].add(leaf)
-
-            #                         st.success(f" Action performed: `{leaf}`")
-            #                         st.code(code_str, language="python")
-            #                         st.dataframe(cleaned_df)
-
-            #                     except Exception as e:
-            #                         st.error(f"❌ Error while applying action: {e}")
-            #         else:
-            #             st.error(f"❌ {response['message']}")
-
-
             if "show_tree" not in st.session_state:
                 st.session_state["show_tree"] = False
             if "executed_actions" not in st.session_state:
@@ -636,7 +736,6 @@ with tab2:
 
             if st.button("Show Interactive Graph for Advanced Cleaning"):
                 st.session_state["show_tree"] = not st.session_state["show_tree"]
-                #st.write("Toggled tree visibility:", st.session_state["show_tree"])
 
             if st.session_state["show_tree"]:
                 st.subheader("Interactive AGraph")
