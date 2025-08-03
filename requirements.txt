@@ -17,3 +17,7 @@ pyvis
 beautifulsoup4
 Pillow
 together
+transformers
+torch
+joblib
+dateparser
