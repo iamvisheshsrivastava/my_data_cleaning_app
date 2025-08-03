@@ -1,1 +1,30 @@
-DB/auditCSVFiles/
+# Ignore system/IDE files
+.DS_Store
+*.log
+*.env
+*.pyc
+
+# Ignore Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Ignore Python cache
+__pycache__/
+
+# Ignore database and large data
+DB/
+*.csv
+*.tsv
+
+# Ignore Streamlit config files (optional)
+.streamlit/
+
+# Ignore model weights or LLM checkpoints if added later
+*.bin
+*.pt
+*.ckpt
+*.onnx
+
+# Ignore local test or scratch files
+delete.ipynb
+deleteMe.py
+
