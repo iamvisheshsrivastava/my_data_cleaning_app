@@ -200,7 +200,7 @@ with tab1:
                 st.session_state.selected_suggestion = ""
                 st.session_state.custom_suggestion = ""
             except Exception as e:
-                st.error(f"Failed to fetch suggestions: {e}")
+                st.error(str(f"Failed to fetch suggestions: {e}"))
 
         selected_radio = None
         if st.session_state.clicked_llm and st.session_state.llm_suggestions:
@@ -250,7 +250,7 @@ with tab1:
                             }
                         })
                     except Exception as e:
-                        st.error(f"Failed to get code from LLM: {e}")
+                        st.error(str(f"Failed to get code from LLM: {e}"))
                         st.stop()
 
                 try:
@@ -454,7 +454,7 @@ def render_column_visualization(df: pd.DataFrame, col: str, inferred_type: str):
                     st.write(urls) 
 
         except Exception as e:
-            st.error(f"Error visualizing `{col}`: {str(e)}")
+            st.error(str(f"Error visualizing `{col}`: {str(e)}"))
 
 def multi_csv_merge_ui(max_files: int = 5):
     """
@@ -708,7 +708,7 @@ with tab2:
                             st.code(executed_code, language="python")
 
                         except Exception as err:
-                            st.error("❌ Failed to apply cleaning.")
+                            st.error(str("❌ Failed to apply cleaning."))
                             st.markdown("#### Error Details")
                             st.error(str(err))
 
@@ -760,7 +760,7 @@ with tab2:
                             st.session_state["agraph_leaf_nodes"] = response["leaves"]
                             st.session_state["agraph_col"] = selected_col
                         else:
-                            st.error(f"❌ {response['message']}")
+                            st.error(str(f"❌ {response['message']}"))
                             st.stop()
 
                     config = Config(
@@ -816,7 +816,7 @@ with tab2:
                                     st.subheader(" Updated Working DataFrame")
 
                                 except Exception as e:
-                                    st.error(f"❌ Error while applying cleaning: {e}")
+                                    st.error(str(f"❌ Error while applying cleaning: {e}"))
 
                     num_rows = st.slider(
                         "Rows to display",
@@ -827,3 +827,47 @@ with tab2:
                     )
                     st.dataframe(st.session_state.df.head(num_rows), use_container_width=True)
                     
+
+##############################################testing##############################################
+import streamlit as st
+import requests
+import time
+import urllib3
+
+# Optional: Disable SSL warnings if needed
+urllib3.disable_warnings()
+
+st.title("⚡ Lightweight LLM Inference via API")
+
+# ✅ Your actual API endpoint (from RunPod)
+API_URL = "https://vrqvlim47f0206-8000.proxy.runpod.net/generate"
+
+# Text area for user input
+user_input = st.text_area(
+    "Enter your query for the LLM:",
+    height=150,
+    placeholder="E.g., Infer type for column 'Date of Birth' and suggest cleaning steps...",
+    key="llm_input_text"
+)
+
+# Submit button
+if st.button("Submit", key="llm_submit_button"):
+    if user_input.strip():
+        with st.spinner("Querying DeepSeek Coder via API..."):
+            try:
+                start_time = time.time()
+                # If you're getting SSL errors, use verify=False
+                response = requests.post(API_URL, json={"prompt": user_input}, verify=False)
+                end_time = time.time()
+                
+                if response.status_code == 200:
+                    result = response.json().get("response", "[No response]")
+                    st.markdown("**LLM Response:**")
+                    st.text_area("Output", result, height=250, key="llm_output_area")
+                    st.success(f"✅ Time taken: {end_time - start_time:.2f} seconds")
+                else:
+                    st.error(str(f"❌ API returned status code: {response.status_code}"))
+            except Exception as e:
+                st.error(str(f"🚨 Error contacting LLM API: {e}"))
+    else:
+        st.warning("Please enter a prompt before submitting.")

@@ -1,22 +1,15 @@
-from transformers import AutoTokenizer, AutoModelForCausalLM
+# llm_utils.py
+import streamlit as st
 import torch
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
-model_id = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+@st.cache_resource
+def load_model():
+    model_id = "google/flan-t5-base"  # Lightweight, good instruction follower
+    
+    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
 
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForCausalLM.from_pretrained(model_id)
+    model.to("cpu")  # Safe for local CPU usage
 
-prompt = """
-Column name: Date of Birth
-Sample values: ['1998-02-14', '03/01/2000', '14th Feb 1998']
-Task: 
-1. Infer type.
-2. Suggest cleaning steps.
-3. Output in JSON.
-
-Answer:
-"""
-
-inputs = tokenizer(prompt, return_tensors="pt")
-outputs = model.generate(**inputs, max_new_tokens=200)
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
+    return tokenizer, model
