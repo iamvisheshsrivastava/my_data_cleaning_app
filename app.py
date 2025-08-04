@@ -32,7 +32,10 @@ from pyvis.network import Network
 from DB.log_to_db import log_session, log_file, log_event
 from datetime import datetime
 import LLM.config
+import time
+import urllib3
 
+urllib3.disable_warnings()
 
 ########################################################################################
 ############################CSV Cleaning with AI Suggestions############################
@@ -856,14 +859,9 @@ with tab2:
                     
 
 ##############################################testing##############################################
-import streamlit as st
-import requests
-import time
-import urllib3
 
-urllib3.disable_warnings()
 
-st.title("⚡ Lightweight LLM Inference via API")
+st.title("⚡ Custom Trained LLM via API")
 
 user_input = st.text_area(
     "Enter your query for the LLM:",
