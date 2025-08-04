@@ -31,6 +31,7 @@ from cleaningDecisionTree import render_pyvis_tree, render_agraph_tree
 from pyvis.network import Network
 from DB.log_to_db import log_session, log_file, log_event
 from datetime import datetime
+import LLM.config
 
 
 ########################################################################################
@@ -660,6 +661,8 @@ with tab2:
                 if not user_viz_prompt.strip():
                     st.warning("Please enter a visualization instruction.")
                 else:
+                    log_event(st.session_state.session_id, "custom_viz_prompt", user_viz_prompt)
+
                     prompt = f"""
             You are a Python data visualization assistant.
 
@@ -681,8 +684,11 @@ with tab2:
                             with st.container():
                                 st.markdown("### 📊 Generated Plot")
                                 st.pyplot(fig)
+                            log_event(st.session_state.session_id, "custom_viz_success", user_viz_prompt)
                         except Exception as e:
                             st.error(str(e))
+                            log_event(st.session_state.session_id, "custom_viz_error", str(e))
+
 
 
 
@@ -697,6 +703,8 @@ with tab2:
                 submitted = st.form_submit_button("Submit to LLM")
 
                 if submitted and user_instruction:
+                    log_event(st.session_state.session_id, "custom_cleaning_prompt", user_instruction)
+
                     with st.spinner("Calling LLM and applying changes..."):
                         try:
                             cleaned_df, executed_code = custom_cleaning_via_llm(user_instruction, st.session_state.df)
@@ -707,13 +715,18 @@ with tab2:
                             st.markdown("### Executed Code")
                             st.code(executed_code, language="python")
 
+                            log_event(st.session_state.session_id, "custom_cleaning_success", executed_code)
+
                         except Exception as err:
                             st.error(str("❌ Failed to apply cleaning."))
                             st.markdown("#### Error Details")
                             st.error(str(err))
 
+                            log_event(st.session_state.session_id, "custom_cleaning_error", str(err))
+
             st.subheader("📄 Current Working CSV")
             st.dataframe(st.session_state.df)
+
 
 
 
@@ -745,7 +758,8 @@ with tab2:
 
                 if selected_col:
                     st.write("Selected column:", selected_col)
-
+                    log_event(st.session_state.session_id, "tree_column_selected", selected_col)   
+                    
                     if (
                         st.session_state["agraph_tree_data"] is None
                         or st.session_state["agraph_col"] != selected_col
@@ -759,8 +773,11 @@ with tab2:
                             }
                             st.session_state["agraph_leaf_nodes"] = response["leaves"]
                             st.session_state["agraph_col"] = selected_col
+                            log_event(st.session_state.session_id, "agraph_tree_generated", f"Tree for {selected_col}")
+
                         else:
                             st.error(str(f"❌ {response['message']}"))
+                            log_event(st.session_state.session_id, "agraph_tree_error", response["message"])
                             st.stop()
 
                     config = Config(
@@ -813,10 +830,20 @@ with tab2:
                                     st.success(f"Cleaning action applied for `{clicked_node}`")
                                     st.code(code_str or st.session_state["last_executed_code"], language="python")
 
+                                    log_event(
+                                                                st.session_state.session_id,
+                                                                "agraph_node_cleaning_success",
+                                                                f"Node: {clicked_node}, Col: {selected_col}, Path: {context_path}"
+                                                            )
                                     st.subheader(" Updated Working DataFrame")
 
                                 except Exception as e:
                                     st.error(str(f"❌ Error while applying cleaning: {e}"))
+                                    log_event(
+                                        st.session_state.session_id,
+                                        "agraph_node_cleaning_error",
+                                        f"{clicked_node} – {str(e)}"
+                                    )
 
                     num_rows = st.slider(
                         "Rows to display",
@@ -834,15 +861,10 @@ import requests
 import time
 import urllib3
 
-# Optional: Disable SSL warnings if needed
 urllib3.disable_warnings()
 
 st.title("⚡ Lightweight LLM Inference via API")
 
-# ✅ Your actual API endpoint (from RunPod)
-API_URL = "https://vrqvlim47f0206-8000.proxy.runpod.net/generate"
-
-# Text area for user input
 user_input = st.text_area(
     "Enter your query for the LLM:",
     height=150,
@@ -850,24 +872,54 @@ user_input = st.text_area(
     key="llm_input_text"
 )
 
-# Submit button
 if st.button("Submit", key="llm_submit_button"):
     if user_input.strip():
         with st.spinner("Querying DeepSeek Coder via API..."):
             try:
                 start_time = time.time()
-                # If you're getting SSL errors, use verify=False
-                response = requests.post(API_URL, json={"prompt": user_input}, verify=False)
+                response = requests.post(LLM.config.API_URL, json={"prompt": user_input}, verify=False)
                 end_time = time.time()
                 
                 if response.status_code == 200:
                     result = response.json().get("response", "[No response]")
                     st.markdown("**LLM Response:**")
                     st.text_area("Output", result, height=250, key="llm_output_area")
-                    st.success(f"✅ Time taken: {end_time - start_time:.2f} seconds")
+                    st.success(f"Time taken: {end_time - start_time:.2f} seconds")
                 else:
-                    st.error(str(f"❌ API returned status code: {response.status_code}"))
+                    st.error(str(f"API returned status code: {response.status_code}"))
             except Exception as e:
-                st.error(str(f"🚨 Error contacting LLM API: {e}"))
+                st.error(str(f"Error contacting LLM API: {e}"))
     else:
         st.warning("Please enter a prompt before submitting.")
+
+
+
+
+##############################################################################################
+############Feedback ########################################################################
+st.markdown("---")
+st.subheader("🔁 Was this response helpful?")
+
+col1, col2 = st.columns(2)
+with col1:
+    thumbs_up = st.button("👍 Yes", key="feedback_thumbs_up")
+with col2:
+    thumbs_down = st.button("👎 No", key="feedback_thumbs_down")
+
+feedback_text = st.text_area(
+    "💬 Any suggestions or comments?",
+    key="feedback_textbox",
+    height=100
+)
+
+import uuid
+if "session_id" not in st.session_state:
+    st.session_state["session_id"] = str(uuid.uuid4())
+    log_session(st.session_state["session_id"])
+
+if st.button("Submit Feedback", key="feedback_submit_button"):
+    feedback_value = "Thumbs Up" if thumbs_up else "Thumbs Down" if thumbs_down else "Neutral"
+    feedback_detail = f"{feedback_value} | {feedback_text.strip()}" if feedback_text.strip() else feedback_value
+    log_event(session_id=st.session_state["session_id"], event_type="feedback", event_detail=feedback_detail)
+    st.success("✅ Feedback submitted successfully!")
+

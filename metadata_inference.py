@@ -30,9 +30,12 @@ import dateparser
 from dateparser.search import search_dates
 
 from joblib import Parallel, delayed
+import LLM.config
 
 import contextlib
-
+import requests
+import urllib3
+urllib3.disable_warnings()
 
 #nltk.download("stopwords")
 #english_stops = set(stopwords.words("english"))
@@ -100,6 +103,32 @@ def _date_success_ratio(series: pd.Series, sample_n: int = 60) -> float:
     slow_ok = slow_needed.apply(lambda x: dateparser.parse(str(x)) is not None
                                 or bool(search_dates(str(x))))
     return (fast_ok.sum() + slow_ok.sum()) / len(sample)
+
+
+def fallback_infer_type_with_llm(col_name, sample_values):
+    prompt = f"""
+Column Name: {col_name}
+Sample Values: {sample_values}
+
+What is the most appropriate data type? 
+Choose one from the following: 
+["Image Bytes", "Image URL", "Video URL", "Document URL", "General URL", "File Path", 
+"GPS Coordinates", "Email Address", "Phone Number", "Percentage", "Currency", "Color Code", 
+"JSON / Nested", "Numerical", "Datetime", "Boolean", "Identifier / ID", "Categorical", 
+"Ordinal", "Duration / Timedelta", "Mixed / Ambiguous", "Text"]
+
+Reply with only one of the above types.
+"""
+    try:
+        response = requests.post(LLM.config.API_URL, json={"prompt": prompt}, verify=False)
+        if response.status_code == 200:
+            result = response.json().get("response", "").strip()
+            return result
+        else:
+            return "Text"
+    except Exception as e:
+        print(f"LLM Fallback Error: {e}")
+        return "Text"
 
 
 def infer_column_type(col: pd.Series,
@@ -179,16 +208,16 @@ def infer_column_type(col: pd.Series,
     if nunique <= 2 and sample.str.lower().isin(BOOL_SET).mean() > 0.90:
         return "Boolean"
 
-    # 6) Identifier / ID (all unique non-null)
+    # 6) Identifier / ID 
     if nunique == len(non_null):
         return "Identifier / ID"
 
-    # 7) Categorical (low cardinality ratio)
+    # 7) Categorical
     unique_ratio = nunique / max(len(col), 1)
     if unique_ratio < 0.05:
         return "Categorical"
 
-    # 8) Ordinal (keyword heuristic)
+    # 8) Ordinal 
     known_ordinals = {"low", "medium", "high", "rare", "common", "excellent", "poor"}
     if sample.str.lower().isin(known_ordinals).mean() > thresh:
         return "Ordinal"
@@ -202,8 +231,19 @@ def infer_column_type(col: pd.Series,
     if len(type_set) > 1:
         return "Mixed / Ambiguous"
 
-    # Fallback
-    return "Text"
+    # Fallback – try LLM once more before returning Text
+    inferred_by_llm = fallback_infer_type_with_llm(col.name, sample.tolist())
+
+    if inferred_by_llm in {
+        "Image Bytes", "Image URL", "Video URL", "Document URL", "General URL", "File Path",
+        "GPS Coordinates", "Email Address", "Phone Number", "Percentage", "Currency", "Color Code",
+        "JSON / Nested", "Numerical", "Datetime", "Boolean", "Identifier / ID", "Categorical",
+        "Ordinal", "Duration / Timedelta", "Mixed / Ambiguous", "Text"
+    }:
+        return inferred_by_llm
+    else:
+        return "Text"
+
 
 
 def get_cleaning_and_enrichment_suggestions(df: pd.DataFrame) -> dict:

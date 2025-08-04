@@ -5,11 +5,11 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 @st.cache_resource
 def load_model():
-    model_id = "google/flan-t5-base"  # Lightweight, good instruction follower
+    model_id = "google/flan-t5-base" 
     
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
 
-    model.to("cpu")  # Safe for local CPU usage
+    model.to("cpu") 
 
     return tokenizer, model

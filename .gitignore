@@ -10,8 +10,7 @@
 # Ignore Python cache
 __pycache__/
 
-# Ignore database and large data
-DB/
+# Ignore large data
 *.csv
 *.tsv
 
