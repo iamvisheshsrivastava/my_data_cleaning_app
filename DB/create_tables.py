@@ -1,6 +1,7 @@
 import sqlite3
+import os
 
-DB_PATH = r"c:\Users\sriva\Desktop\AICUFLow\my_data_cleaning_app\audit.db"
+DB_PATH = os.path.join(os.path.dirname(__file__), "audit.db")
 
 conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
