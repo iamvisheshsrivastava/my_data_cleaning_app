@@ -21,3 +21,4 @@ transformers
 torch
 joblib
 dateparser
+dtale
