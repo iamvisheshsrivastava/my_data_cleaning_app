@@ -1,7 +1,8 @@
 import sqlite3
 from datetime import datetime
+import os
 
-DB_PATH = r"c:\Users\sriva\Desktop\AICUFLow\my_data_cleaning_app\audit.db"
+DB_PATH = os.path.join(os.path.dirname(__file__), "audit.db")
 
 def log_session(session_id):
     conn = sqlite3.connect(DB_PATH)
