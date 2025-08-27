@@ -162,8 +162,6 @@ AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 streamlit run app.py
 ```
 
-Open the URL that Streamlit prints (usually [http://localhost:8501](http://localhost:8501)).
-
 ---
 
 ## 🧩 Usage Guide
