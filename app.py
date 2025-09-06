@@ -696,10 +696,59 @@ with tab2:
 
 
 ################################### Custom Cleaning Via LLM ###################################
+            # if "df" not in st.session_state:
+            #     st.session_state.df = df.copy() 
+
+            # st.markdown("## 🛠️ Custom Cleaning via LLM")
+
+            # with st.form(key="custom_cleaning_form"):
+            #     user_instruction = st.text_area("Enter your custom cleaning instruction")
+            #     submitted = st.form_submit_button("Submit to LLM")
+
+            #     if submitted and user_instruction:
+            #         log_event(st.session_state.session_id, "custom_cleaning_prompt", user_instruction)
+
+            #         with st.spinner("Calling LLM and applying changes..."):
+            #             try:
+            #                 cleaned_df, executed_code = custom_cleaning_via_llm(user_instruction, st.session_state.df)
+                            
+            #                 st.session_state.df = cleaned_df
+
+            #                 st.success("✅ Cleaning applied successfully!")
+            #                 st.markdown("### Executed Code")
+            #                 st.code(executed_code, language="python")
+
+            #                 log_event(st.session_state.session_id, "custom_cleaning_success", executed_code)
+
+            #             except Exception as err:
+            #                 st.error(str("❌ Failed to apply cleaning."))
+            #                 st.markdown("#### Error Details")
+            #                 st.error(str(err))
+
+            #                 log_event(st.session_state.session_id, "custom_cleaning_error", str(err))
+
+            # st.subheader("📄 Current Working CSV")
+            # st.dataframe(st.session_state.df)
+
+
+            from vector_store.store import add_suggestion, query_suggestions  # <-- import memory functions
+
             if "df" not in st.session_state:
                 st.session_state.df = df.copy() 
 
             st.markdown("## 🛠️ Custom Cleaning via LLM")
+
+            use_memory = st.checkbox("📌 Use past cleaning memory (RAG)", value=True)
+
+            # 🔹 Show general past suggestions immediately
+            if use_memory:
+                related = query_suggestions("cleaning", n_results=5)  # dummy query to fetch some memory
+                if related and "documents" in related and related["documents"][0]:
+                    st.markdown("### 📌 Related Past Suggestions (general)")
+                    for idx, doc in enumerate(related["documents"][0], start=1):
+                        st.write(f"{idx}. {doc}")
+                else:
+                    st.info("⚠️ No past memory found yet.")
 
             with st.form(key="custom_cleaning_form"):
                 user_instruction = st.text_area("Enter your custom cleaning instruction")
@@ -708,20 +757,38 @@ with tab2:
                 if submitted and user_instruction:
                     log_event(st.session_state.session_id, "custom_cleaning_prompt", user_instruction)
 
+                    # 🔹 Step 1: Retrieve related past suggestions for this query
+                    if use_memory:
+                        related = query_suggestions(user_instruction, n_results=3)
+                        if related and "documents" in related and related["documents"][0]:
+                            st.markdown("### 📌 Related Past Suggestions (for your query)")
+                            for idx, doc in enumerate(related["documents"][0], start=1):
+                                st.write(f"{idx}. {doc}")
+                        else:
+                            st.info("⚠️ No past memory found yet for this query.")
+
                     with st.spinner("Calling LLM and applying changes..."):
                         try:
                             cleaned_df, executed_code = custom_cleaning_via_llm(user_instruction, st.session_state.df)
-                            
                             st.session_state.df = cleaned_df
 
                             st.success("✅ Cleaning applied successfully!")
                             st.markdown("### Executed Code")
                             st.code(executed_code, language="python")
 
+                            # 🔹 Step 2: Save suggestion + executed code into memory
+                            metadata = {
+                                "id": str(uuid.uuid4()),
+                                "session_id": st.session_state.session_id,
+                                "instruction": user_instruction,
+                                "code": executed_code
+                            }
+                            add_suggestion(user_instruction, metadata)
+
                             log_event(st.session_state.session_id, "custom_cleaning_success", executed_code)
 
                         except Exception as err:
-                            st.error(str("❌ Failed to apply cleaning."))
+                            st.error("❌ Failed to apply cleaning.")
                             st.markdown("#### Error Details")
                             st.error(str(err))
 
@@ -729,8 +796,6 @@ with tab2:
 
             st.subheader("📄 Current Working CSV")
             st.dataframe(st.session_state.df)
-
-
 
 
 ################################### Decision Tree Visualization ##################################

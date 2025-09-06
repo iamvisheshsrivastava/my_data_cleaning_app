@@ -14,8 +14,13 @@ __pycache__/
 *.csv
 *.tsv
 
-# Ignore Streamlit config files (optional)
+# Ignore virtual environments
+venv/
+.venv/
+
+# Ignore Streamlit config files
 .streamlit/
+.streamlit/secrets.toml
 
 # Ignore model weights or LLM checkpoints if added later
 *.bin
@@ -26,4 +31,3 @@ __pycache__/
 # Ignore local test or scratch files
 delete.ipynb
 deleteMe.py
-

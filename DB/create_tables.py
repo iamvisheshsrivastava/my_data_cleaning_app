@@ -24,7 +24,7 @@ cursor.execute('''
         FOREIGN KEY (session_id) REFERENCES sessions(session_id)
     )
 ''')
-
+ 
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS events (
         event_id INTEGER PRIMARY KEY AUTOINCREMENT,
