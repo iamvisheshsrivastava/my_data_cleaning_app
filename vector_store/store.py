@@ -47,3 +47,15 @@ if collection.count() == 0:
     for text, meta in dummy_data:
         collection.add(documents=[text], metadatas=[meta], ids=[meta["id"]])
     print("✅ Seeded dummy suggestions into vector DB")
+
+def get_all_suggestions():
+    """
+    Return all stored suggestions and their metadata.
+    """
+    return collection.get()
+
+def count_suggestions():
+    """
+    Return total number of stored suggestions.
+    """
+    return collection.count()

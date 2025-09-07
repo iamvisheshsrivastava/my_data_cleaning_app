@@ -34,6 +34,7 @@ from datetime import datetime
 import LLM.config
 import time
 import urllib3
+from vector_store.store import query_suggestions, add_suggestion, get_all_suggestions, count_suggestions
 
 urllib3.disable_warnings()
 
@@ -116,7 +117,8 @@ with open("table_steps.json", "r") as f:
 
 st.set_page_config(page_title="Smart CSV Toolkit", layout="wide")
 st.title("Smart CSV Toolkit")
-tab1, tab2 = st.tabs(["🧼 CSV Cleaner", "🧠 Metadata Inspector"])
+#tab1, tab2 = st.tabs(["🧼 CSV Cleaner", "🧠 Metadata Inspector"])
+tab1, tab2, tab3 = st.tabs(["🧼 CSV Cleaner", "🧠 Metadata Inspector", "📚 Memory Browser"])
 
 with tab1:
     st.header("CSV Cleaning with AI Suggestions")
@@ -986,3 +988,30 @@ if st.button("Submit Feedback", key="feedback_submit_button"):
     log_event(session_id=st.session_state["session_id"], event_type="feedback", event_detail=feedback_detail)
     st.success("✅ Feedback submitted successfully!")
 
+
+with tab3:
+    st.header("📚 Memory Browser")
+
+    search_query = st.text_input("🔍 Search past suggestions", placeholder="e.g., datetime, drop column...")
+
+    if st.button("Search Memory"):
+        if search_query.strip():
+            results = query_suggestions(search_query, n_results=10)
+            if results and "documents" in results and results["documents"][0]:
+                st.success(f"Found {len(results['documents'][0])} suggestions")
+                for idx, doc in enumerate(results["documents"][0], start=1):
+                    meta = results["metadatas"][0][idx-1]
+                    st.markdown(f"**{idx}. {doc}**")
+                    st.caption(f"Session: {meta.get('session_id', '-')}, Code: `{meta.get('code', '')}`")
+            else:
+                st.info("⚠️ No suggestions found for this query.")
+
+    if st.button("Show All Memory"):
+        count = count_suggestions()
+        st.write(f"Total suggestions stored: {count}")
+        if count > 0:
+            all_data = get_all_suggestions()
+            for idx, doc in enumerate(all_data["documents"], start=1):
+                meta = all_data["metadatas"][idx-1]
+                st.markdown(f"**{idx}. {doc}**")
+                st.caption(f"Session: {meta.get('session_id', '-')}, Code: `{meta.get('code', '')}`")
