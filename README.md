@@ -34,7 +34,7 @@ A Streamlit app that helps you **clean CSVs, infer column semantics, merge multi
 
 * **Multi‑CSV Merge UI**
 
-  * Upload up to **5** CSVs, configure pairwise joins (keys + type), then merge with one click
+  * Upload up to **5** CSVs, configure pairwise joins (keys + type), then merge CSVs with one click
 
 * **Interactive Cleaning Graph**
 
