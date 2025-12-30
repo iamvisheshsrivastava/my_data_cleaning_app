@@ -2,6 +2,11 @@
 
 A Streamlit app that helps you **clean CSVs, infer column semantics, merge multiple files, and generate visualizations** — with optional help from an LLM. It’s designed to be practical and auditable: you always see the code an LLM proposes, you can accept/reject steps, and your actions are **logged to SQLite**.
 
+## Results / Impact
+- Speeds up exploratory data cleaning with guided, executable steps
+- Produces auditable, repeatable pipelines (all actions logged)
+- Reduces trial-and-error by surfacing concrete cleaning code and visuals
+
 > **TL;DR**
 > • **Tab 1 – CSV Cleaner:** choose built‑in steps from `table_steps.json`, get **LLM suggestions**, optionally apply **LLM‑generated Python code** (shown before execution), and download the cleaned CSV.
 > • **Tab 2 – Metadata Inspector:** upload/merge up to 5 CSVs, **infer column types**, preview media/links, and **auto‑generate plots** (with or without LLM help).
@@ -299,20 +304,3 @@ Issues and PRs are welcome! Please include a clear description, steps to reprodu
 
 ---
 
-
----
-
-## 🙌 Acknowledgements
-
-* **Streamlit**, **pandas**, **Plotly**, **Matplotlib**, **Seaborn**, **WordCloud**, **BeautifulSoup**
-* **D‑Tale**, **streamlit‑agraph**, **PyVis**
-* **Together** (LLM API)
-
----
-
-## 🧑‍💻 Author
-
-**Vishesh Srivastava**
-Portfolio: visheshsrivastava.com
-GitHub: github.com/iamvisheshsrivastava
-LinkedIn: linkedin.com/in/iamvisheshsrivastava
