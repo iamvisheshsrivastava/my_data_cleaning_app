@@ -6,6 +6,7 @@ import json
 import tempfile
 import contextlib
 from io import BytesIO
+from pathlib import Path
 from uuid import uuid4
 
 import pandas as pd
@@ -605,17 +606,17 @@ with tab2:
         log_session(st.session_state.session_id)
 
         # ⏺️ Save uploaded file to audit directory
-        AUDIT_DIR = r"C:\Users\sriva\Desktop\AICUFLow\my_data_cleaning_app\DB\auditCSVFiles"
-        os.makedirs(AUDIT_DIR, exist_ok=True)
+        AUDIT_DIR = Path(__file__).resolve().parent / "DB" / "auditCSVFiles"
+        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
         filename = f"uploaded_{timestamp}_{st.session_state.session_id[:8]}.csv"
-        file_path = os.path.join(AUDIT_DIR, filename)
+        file_path = AUDIT_DIR / filename
 
         df.to_csv(file_path, index=False)
 
         # ⏺️ Log file save and event
-        log_file(st.session_state.session_id, filename, file_path)
+        log_file(st.session_state.session_id, filename, str(file_path))
         log_event(st.session_state.session_id, "file_upload", f"Saved CSV to {file_path}")
 
         st.subheader("Preview of Uploaded Data")

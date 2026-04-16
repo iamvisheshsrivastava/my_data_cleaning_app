@@ -147,19 +147,13 @@ API_URL = "http://localhost:9000/generate"  # your FastAPI/Flask inference endpo
 
 ### 3) Audit Folder Path
 
-In `app.py`, the audit directory defaults to a **Windows path**:
+Uploaded and merged CSVs are saved automatically under the repo-local audit folder:
 
-```python
-AUDIT_DIR = r"C:\\Users\\sriva\\Desktop\\AICUFLow\\my_data_cleaning_app\\DB\\auditCSVFiles"
+```text
+DB/auditCSVFiles/
 ```
 
-Change this to a portable relative path if you’re on macOS/Linux:
-
-```python
-from pathlib import Path
-AUDIT_DIR = Path("DB/auditCSVFiles")
-AUDIT_DIR.mkdir(parents=True, exist_ok=True)
-```
+The app now resolves this path relative to `app.py`, so the default setup is portable across Windows, macOS, and Linux.
 
 ### 4) Run the App
 
