@@ -7,7 +7,6 @@ nltk
 geopy
 tldextract
 requests
-replicate
 plotly
 matplotlib
 seaborn
@@ -16,7 +15,7 @@ streamlit-agraph
 pyvis
 beautifulsoup4
 Pillow
-together
+google-generativeai
 transformers
 torch
 joblib

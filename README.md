@@ -88,7 +88,7 @@ my_data_cleaning_app/
 2. **Pipeline Execution** — `pipeline_logic.run_pipeline(df, steps)` executes selected steps in order. If an LLM instruction was accepted, its generated code is appended as a step and executed safely within the pipeline wrapper.
 3. **LLM Helpers**
 
-   * `call_llm()` uses the Together API with model `moonshotai/Kimi-K2-Instruct` to:
+   * `call_llm()` uses the Google Generative AI (Gemini) API with model `gemini-1.5-flash` to:
 
      * generate *cleaning suggestions* (`fetch_llm_suggestions`)
      * translate a *natural instruction* → **raw Python code** (`get_cleaning_code_from_llm`)
@@ -120,17 +120,23 @@ pip install -r requirements.txt
 
 ### 2) Configure LLMs (Optional but recommended)
 
-**Together API (used by `call_llm`)**
+**Google Generative AI / Gemini API (used by `call_llm`)**
 
-* Create an account and get an API key.
-* Set the environment variable before running Streamlit:
+* Create an account at [Google AI Studio](https://aistudio.google.com/apikey) and get an API key.
+* Add the API key to your `.streamlit/secrets.toml` file:
+
+```toml
+GEMINI_API_KEY = "your-gemini-api-key-here"
+```
+
+Alternatively, set the environment variable before running Streamlit:
 
 ```bash
 # Windows PowerShell
-$env:TOGETHER_API_KEY = "YOUR_KEY"
+$env:GEMINI_API_KEY = "YOUR_KEY"
 
 # macOS/Linux
-export TOGETHER_API_KEY="YOUR_KEY"
+export GEMINI_API_KEY="YOUR_KEY"
 ```
 
 **Custom LLM endpoint (used by the bottom "Custom Trained LLM via API" section)**
@@ -251,7 +257,7 @@ Each `option` supports `data_type` (`int`, `float`, `str`, `select`) and optiona
 
 * **Review before execution**: LLM‑generated code is shown in the UI; execute only if you trust it.
 * **Network requests**: General URL analysis fetches webpages; avoid unknown or untrusted domains.
-* **Secrets**: Keep API keys in environment variables (don’t commit them). The Together client reads `TOGETHER_API_KEY` from env.
+* **Secrets**: Keep API keys in environment variables or in `.streamlit/secrets.toml` (don't commit them). The Gemini client reads `GEMINI_API_KEY` from secrets.toml or environment.
 * **SSL**: The custom LLM request uses `verify=False` by default; enable verification for production.
 
 ---
@@ -259,7 +265,7 @@ Each `option` supports `data_type` (`int`, `float`, `str`, `select`) and optiona
 ## 🧰 Requirements
 
 * Python **3.10+**
-* See `requirements.txt` for the full list (notably: `streamlit`, `pandas`, `plotly`, `matplotlib`, `seaborn`, `wordcloud`, `beautifulsoup4`, `dtale`, `streamlit-agraph`, `pyvis`, `together`, `requests`).
+* See `requirements.txt` for the full list (notably: `streamlit`, `pandas`, `plotly`, `matplotlib`, `seaborn`, `wordcloud`, `beautifulsoup4`, `dtale`, `streamlit-agraph`, `pyvis`, `google-generativeai`, `requests`).
 
 ---
 
@@ -274,7 +280,7 @@ Each `option` supports `data_type` (`int`, `float`, `str`, `select`) and optiona
 ## 🧩 Troubleshooting
 
 * *D‑Tale link not opening*: Ensure your browser can reach the host/port D‑Tale binds to; check firewall and proxy; try opening the printed URL directly.
-* *LLM suggestions/code empty or errors*: Confirm `TOGETHER_API_KEY` is set; the Together service reachable; retry with a simpler instruction.
+* *LLM suggestions/code empty or errors*: Confirm `GEMINI_API_KEY` is set in `.streamlit/secrets.toml`; ensure your Gemini API quota is not exhausted; retry with a simpler instruction.
 * *Custom LLM API errors*: Ensure your server at `LLM.config.API_URL` is running and returns `{ "response": "..." }` JSON.
 * *Large CSVs*: If memory is tight, run with a smaller sample or increase system RAM; consider chunked processing in future extensions.
 * *Visualization errors*: Some plots assume valid numeric/datetime parsing; ensure columns are cast or adjust instructions accordingly.

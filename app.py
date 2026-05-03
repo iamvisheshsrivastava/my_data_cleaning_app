@@ -12,7 +12,6 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 import requests
-import replicate
 import dtale
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -22,7 +21,7 @@ from PIL import Image
 from bs4 import BeautifulSoup
 from wordcloud import WordCloud
 
-from together import Together
+import google.generativeai as genai
 from streamlit_agraph import agraph, Config
 import streamlit.components.v1 as components
 
@@ -44,14 +43,24 @@ urllib3.disable_warnings()
 ########################################################################################
 
 def call_llm(prompt: str, temperature=0.3, max_tokens=700) -> str:
-    client = Together()
-    response = client.chat.completions.create(
-        model="moonshotai/Kimi-K2-Instruct",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-        max_tokens=max_tokens
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
+    except:
+        api_key = ""
+    
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not found in secrets.toml or environment variables")
+    
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.types.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
     )
-    return response.choices[0].message.content.strip()
+    return response.text.strip()
 
 def get_cleaning_code_from_llm(instruction: str, df: pd.DataFrame) -> str:
             example_data = df.head(2).to_dict(orient="records")

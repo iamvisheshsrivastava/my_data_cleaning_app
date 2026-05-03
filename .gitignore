@@ -3,6 +3,10 @@
 *.log
 *.env
 *.pyc
+
+# Streamlit secrets (contains API keys)
+.streamlit/secrets.toml
+secrets.toml
 *.db
 *.sqlite3
 

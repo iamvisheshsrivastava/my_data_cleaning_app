@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from typing import Tuple
-from together import Together
+import google.generativeai as genai
 
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, Binarizer
@@ -469,15 +469,25 @@ PROMPT LENGTH (characters): {len(user_instruction) + len(formatted_df)}
         raise RuntimeError(f"Failed to apply LLM cleaning: {e}")
 
 def call_llm(prompt: str, temperature=0.3, max_tokens=700) -> str:
-    client = Together()
-    response = client.chat.completions.create(
-        model="moonshotai/Kimi-K2-Instruct",
-        #model="Qwen/Qwen3-235B-A22B-Instruct-2507-tput",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=temperature,
-        max_tokens=max_tokens
+    import streamlit as st
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
+    except:
+        api_key = ""
+    
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY not found in secrets.toml or environment variables")
+    
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.types.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
     )
-    return response.choices[0].message.content.strip()
+    return response.text.strip()
 
 def execute_plot_code(code: str, df: pd.DataFrame):
     """
