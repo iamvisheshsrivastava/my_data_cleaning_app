@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 import numpy as np
 import re
@@ -9,6 +10,8 @@ import datetime as dt
 from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+logger = logging.getLogger(__name__)
 
 from typing import Tuple
 import google.generativeai as genai
@@ -89,10 +92,12 @@ def _is_binary_image(val) -> bool:
     return False
 
 def _date_success_ratio(series: pd.Series, sample_n: int = 60) -> float:
-    if series.empty:
+    non_null = series.dropna()
+    # Guard against an empty or all-null series — nothing to parse.
+    if series.empty or non_null.empty:
         return 0.0
 
-    sample   = series.dropna().sample(min(sample_n, len(series)), random_state=42)
+    sample   = non_null.sample(min(sample_n, len(non_null)), random_state=42)
     fast     = pd.to_datetime(sample, errors="coerce", infer_datetime_format=True)
     fast_ok  = fast.notna()
 
@@ -381,7 +386,10 @@ def analyze_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         score_ms = (time.perf_counter() - t0) * 1_000
 
         total_ms = (time.perf_counter() - col_start) * 1_000
-        print(f"[TIMING] {col_name:<20} infer={infer_ms:6.1f} ms | score={score_ms:6.1f} ms | total={total_ms:6.1f} ms")
+        logger.debug(
+            "[TIMING] %-20s infer=%6.1f ms | score=%6.1f ms | total=%6.1f ms",
+            col_name, infer_ms, score_ms, total_ms,
+        )
 
         return {
             "Column": col_name,

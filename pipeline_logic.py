@@ -1,3 +1,17 @@
+"""
+pipeline_logic.py
+=================
+Defines every data-cleaning / transformation operation that can be applied
+to a pandas DataFrame, plus the `run_pipeline` orchestrator that chains them.
+
+Each operation follows the same contract:
+    func(data: pd.DataFrame, params: <ParamsDataclass>) -> pd.DataFrame
+
+A matching ``OPERATION_MAP`` dictionary maps step names (as they appear in
+``table_steps.json``) to their implementation functions so that
+``run_pipeline`` can dispatch dynamically.
+"""
+
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 import pandas as pd
@@ -66,6 +80,25 @@ class AddNoiseParams:
     noise_factor: float = 0.1
 
 def impute_missing(data: pd.DataFrame, params: ImputeMissingValuesParams) -> pd.DataFrame:
+    """Fill missing values in numeric (and optionally all) columns.
+
+    Strategies:
+        - ``"mean"`` / ``"median"`` / ``"constant"`` – applied to numeric
+          columns only via :class:`sklearn.impute.SimpleImputer`.
+        - ``"most_frequent"`` – applied across *all* columns (works for both
+          numeric and categorical/object dtypes).
+
+    Args:
+        data: Input DataFrame.  Modified in place and returned.
+        params: Configuration dataclass with ``strategy`` and ``fill_value``.
+
+    Returns:
+        DataFrame with NaNs filled.
+
+    Raises:
+        ValueError: If the strategy is invalid, or if mean/median/constant is
+            requested but no numeric columns are present.
+    """
     strategy = params.strategy
     fill_value = params.fill_value
     numeric_cols = data.select_dtypes(include=np.number).columns
@@ -83,12 +116,35 @@ def impute_missing(data: pd.DataFrame, params: ImputeMissingValuesParams) -> pd.
 
 
 def normalize(data: pd.DataFrame, params: NormalizeParams) -> pd.DataFrame:
+    """Standardise all numeric columns to zero mean and unit variance (Z-score).
+
+    Uses :class:`sklearn.preprocessing.StandardScaler` which divides by the
+    population standard deviation (``ddof=0``).
+
+    Args:
+        data: Input DataFrame.
+        params: ``NormalizeParams`` (no configurable options).
+
+    Returns:
+        DataFrame with numeric columns standardised.
+    """
     scaler = StandardScaler()
     numeric_cols = data.select_dtypes(include=np.number).columns
     data[numeric_cols] = scaler.fit_transform(data[numeric_cols])
     return data
 
 def scale(data: pd.DataFrame, params: ScaleParams) -> pd.DataFrame:
+    """Rescale all numeric columns to a specified [min, max] range (MinMax scaling).
+
+    Uses :class:`sklearn.preprocessing.MinMaxScaler`.
+
+    Args:
+        data: Input DataFrame.
+        params: ``ScaleParams`` with ``min_value`` and ``max_value``.
+
+    Returns:
+        DataFrame with numeric columns rescaled.
+    """
     scaler = MinMaxScaler(feature_range=(params.min_value, params.max_value))
     numeric_cols = data.select_dtypes(include=np.number).columns
     data[numeric_cols] = scaler.fit_transform(data[numeric_cols])
@@ -127,10 +183,38 @@ def llm_data_cleaning(data: pd.DataFrame, params: Any) -> pd.DataFrame:
         )
 
 def one_hot_encode(data: pd.DataFrame, params: Any) -> pd.DataFrame:
+    """One-hot encode every object/categorical column using ``pd.get_dummies``.
+
+    All string columns are expanded into binary indicator columns; numeric
+    columns are left unchanged.
+
+    Args:
+        data: Input DataFrame.
+        params: Not used (accepted for interface consistency).
+
+    Returns:
+        DataFrame with categorical columns replaced by binary dummies.
+    """
     categorical_cols = data.select_dtypes(include='object').columns
     return pd.get_dummies(data, columns=categorical_cols)
 
 def binarize(data: pd.DataFrame, params: BinarizeParams) -> pd.DataFrame:
+    """Threshold numeric columns to binary 0/1 values.
+
+    Values strictly greater than ``threshold`` become 1; all others become 0.
+    NaNs in numeric columns cause an early failure with a helpful message —
+    run ``impute_missing`` first if needed.
+
+    Args:
+        data: Input DataFrame.
+        params: ``BinarizeParams`` with a ``threshold`` float.
+
+    Returns:
+        DataFrame with numeric columns binarized.
+
+    Raises:
+        ValueError: If any numeric column still contains NaN values.
+    """
     binarizer = Binarizer(threshold=params.threshold)
     numeric_cols = data.select_dtypes(include=np.number).columns
 
@@ -144,6 +228,18 @@ def binarize(data: pd.DataFrame, params: BinarizeParams) -> pd.DataFrame:
     return data
 
 def remove_outliers(data: pd.DataFrame, params: RemoveOutliersParams) -> pd.DataFrame:
+    """Remove rows where any numeric value falls outside the IQR-based fence.
+
+    For each numeric column, the lower fence is ``Q1 - k*IQR`` and the upper
+    fence is ``Q3 + k*IQR``, where ``k = iqr_multiplier`` (default 1.5).
+
+    Args:
+        data: Input DataFrame.
+        params: ``RemoveOutliersParams`` with ``iqr_multiplier``.
+
+    Returns:
+        DataFrame with outlier rows removed.
+    """
     numeric_cols = data.select_dtypes(include=np.number).columns
     for col in numeric_cols:
         Q1 = data[col].quantile(0.25)
@@ -155,12 +251,45 @@ def remove_outliers(data: pd.DataFrame, params: RemoveOutliersParams) -> pd.Data
     return data
 
 def remove_nan_cols(data: pd.DataFrame, params: RemoveNaNColsParams) -> pd.DataFrame:
+    """Drop columns whose fraction of NaN values exceeds the given threshold.
+
+    Args:
+        data: Input DataFrame.
+        params: ``RemoveNaNColsParams`` with ``nan_threshold`` (0–1).
+
+    Returns:
+        DataFrame with high-NaN columns removed.
+    """
     return data.loc[:, data.isnull().mean() < params.nan_threshold]
 
 def remove_nan_rows(data: pd.DataFrame, params: RemoveNaNRowsParams) -> pd.DataFrame:
+    """Drop rows whose fraction of NaN values exceeds the given threshold.
+
+    Args:
+        data: Input DataFrame.
+        params: ``RemoveNaNRowsParams`` with ``nan_threshold`` (0–1).
+
+    Returns:
+        DataFrame with high-NaN rows removed.
+    """
     return data.loc[data.isnull().mean(axis=1) < params.nan_threshold]
 
 def dataset_multiplier(data: pd.DataFrame, params: DatasetMultiplierParams) -> pd.DataFrame:
+    """Duplicate the dataset N times by stacking copies of the DataFrame.
+
+    Useful for augmenting small datasets before training.  The integer
+    multiplier can be supplied as a plain int or as a string like ``"2x"``.
+
+    Args:
+        data: Input DataFrame.
+        params: ``DatasetMultiplierParams`` with ``size_multiplier``.
+
+    Returns:
+        DataFrame with ``len(data) * multiplier`` rows and a reset index.
+
+    Raises:
+        ValueError: If ``size_multiplier`` cannot be parsed as an integer.
+    """
     try:
         multiplier = int(str(params.size_multiplier).replace("x", ""))
     except Exception:
@@ -171,6 +300,18 @@ def dataset_multiplier(data: pd.DataFrame, params: DatasetMultiplierParams) -> p
     return pd.concat([data] * multiplier, ignore_index=True)
 
 def add_noise(data: pd.DataFrame, params: AddNoiseParams) -> pd.DataFrame:
+    """Add Gaussian noise to every numeric column.
+
+    Draws noise from ``N(0, noise_factor)`` and adds it element-wise.  A
+    ``noise_factor`` of 0 is a no-op.
+
+    Args:
+        data: Input DataFrame.
+        params: ``AddNoiseParams`` with ``noise_factor`` (standard deviation).
+
+    Returns:
+        DataFrame with noise injected into numeric columns.
+    """
     numeric_cols = data.select_dtypes(include=np.number).columns
     noise = np.random.normal(loc=0.0, scale=params.noise_factor, size=data[numeric_cols].shape)
     data[numeric_cols] = data[numeric_cols] + noise
@@ -248,6 +389,24 @@ OPERATION_MAP = {
 }
 
 def run_pipeline(data: pd.DataFrame, steps: List[Dict[str, Any]]) -> pd.DataFrame:
+    """Execute a sequence of named cleaning steps on a DataFrame.
+
+    Each element of ``steps`` is a dict like::
+
+        {"name": "Impute Missing Values", "params": {"strategy": "mean", "fill_value": 0.0}}
+
+    Step names must match the keys in ``OPERATION_MAP``.  Unknown names are
+    silently skipped so the pipeline can continue even when a step is
+    misconfigured.
+
+    Args:
+        data: The DataFrame to process (a copy is typically passed by the
+            caller; this function mutates and returns it).
+        steps: Ordered list of step descriptors.
+
+    Returns:
+        Cleaned / transformed DataFrame after all recognised steps are applied.
+    """
     for step in steps:
         name = step["name"]
         params_dict = step.get("params", {})
@@ -281,7 +440,9 @@ def run_pipeline(data: pd.DataFrame, steps: List[Dict[str, Any]]) -> pd.DataFram
         elif name == "Undersample":
             params = UndersampleParams(**params_dict)
         else:
-            continue  
+            # Unknown step name — skip gracefully so the rest of the pipeline
+            # can still run.  The UI surfaces a warning separately if needed.
+            continue
         data = OPERATION_MAP[name](data, params)
 
     return data

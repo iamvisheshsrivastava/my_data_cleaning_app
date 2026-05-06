@@ -1,3 +1,25 @@
+"""
+app.py — Smart CSV Toolkit
+===========================
+Main Streamlit application with three tabs:
+
+    Tab 1 – CSV Cleaner:        Upload a CSV, select pipeline steps (with
+                                configurable parameters), request AI-generated
+                                cleaning suggestions, and download the result.
+
+    Tab 2 – Metadata Inspector: Infer column types, visualise each column,
+                                run a custom LLM cleaning instruction, and
+                                explore an interactive decision-tree for
+                                advanced cleaning actions.
+
+    Tab 3 – Memory Browser:     Search or browse past LLM cleaning
+                                suggestions stored in the ChromaDB vector
+                                store (RAG memory).
+
+Below the tabs there is also a panel for querying a custom-trained local LLM
+via REST API, and a feedback widget.
+"""
+
 import os
 import re
 import io
@@ -42,17 +64,35 @@ urllib3.disable_warnings()
 ############################CSV Cleaning with AI Suggestions############################
 ########################################################################################
 
-def call_llm(prompt: str, temperature=0.3, max_tokens=700) -> str:
+def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> str:
+    “””Send a prompt to the Gemini 1.5 Flash model and return the text response.
+
+    The API key is read from ``st.secrets[“GEMINI_API_KEY”]``; if it is absent
+    the function raises immediately so the caller can surface a clear error to
+    the user rather than a cryptic auth failure.
+
+    Args:
+        prompt: Full prompt string to send to the model.
+        temperature: Sampling temperature (0 = deterministic, 1 = creative).
+            Defaults to 0.3 for consistent data-cleaning outputs.
+        max_tokens: Maximum number of output tokens.  Defaults to 700.
+
+    Returns:
+        Stripped text response from the model.
+
+    Raises:
+        ValueError: If ``GEMINI_API_KEY`` is not configured.
+    “””
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY", "")
-    except:
-        api_key = ""
-    
+        api_key = st.secrets.get(“GEMINI_API_KEY”, “”)
+    except Exception:
+        api_key = “”
+
     if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in secrets.toml or environment variables")
-    
+        raise ValueError(“GEMINI_API_KEY not found in secrets.toml or environment variables”)
+
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel(“gemini-1.5-flash”)
     response = model.generate_content(
         prompt,
         generation_config=genai.types.GenerationConfig(
@@ -62,36 +102,70 @@ def call_llm(prompt: str, temperature=0.3, max_tokens=700) -> str:
     )
     return response.text.strip()
 
+
 def get_cleaning_code_from_llm(instruction: str, df: pd.DataFrame) -> str:
-            example_data = df.head(2).to_dict(orient="records")
-            prompt = f"""
-            You are a Python data cleaning assistant.
+    “””Ask the LLM to generate raw Python code that cleans ``df`` in-place.
 
-            INSTRUCTION: Convert the following user instruction into Python code that modifies the `df` DataFrame in-place.
+    Sends the natural-language instruction together with a 2-row sample of the
+    DataFrame so the model has concrete column/type context.  The returned
+    string is raw Python — no markdown fences or explanations.
 
-            RULES:
-            - DO NOT wrap your answer in markdown or backticks
-            - DO NOT return explanation or comments
-            - ONLY return raw Python code
+    Args:
+        instruction: User-written cleaning instruction, e.g.
+            ``”Drop rows where 'Age' is negative”``.
+        df: The DataFrame to be cleaned (only the first 2 rows are sent).
 
-            Instruction:
-            \"\"\"{instruction}\"\"\"
+    Returns:
+        Raw Python code string that modifies a variable named ``df``.
+    “””
+    example_data = df.head(2).to_dict(orient=”records”)
+    prompt = f”””
+    You are a Python data cleaning assistant.
 
-            Sample Data:
-            {json.dumps(example_data, indent=2)}
-            """
-            return call_llm(prompt, temperature=0.2, max_tokens=500)
+    INSTRUCTION: Convert the following user instruction into Python code that modifies the `df` DataFrame in-place.
 
-def fetch_llm_suggestions(df, config):
+    RULES:
+    - DO NOT wrap your answer in markdown or backticks
+    - DO NOT return explanation or comments
+    - ONLY return raw Python code
+
+    Instruction:
+    \”\”\”{instruction}\”\”\”
+
+    Sample Data:
+    {json.dumps(example_data, indent=2)}
+    “””
+    return call_llm(prompt, temperature=0.2, max_tokens=500)
+
+
+def fetch_llm_suggestions(df: pd.DataFrame, config: dict) -> list:
+    “””Request 5 actionable cleaning suggestions for the given DataFrame.
+
+    Extracts the names and descriptions of already-configured pipeline steps
+    from ``config`` and explicitly excludes them from the suggestions to avoid
+    redundancy.
+
+    Args:
+        df: The uploaded DataFrame (first 2 rows are sent to the LLM).
+        config: The parsed ``table_steps.json`` configuration dict.
+
+    Returns:
+        A list of 5 suggestion strings as returned by the LLM.
+
+    Raises:
+        json.JSONDecodeError: If the LLM response cannot be parsed as JSON.
+    “””
+    # Collect all step names/descriptions already in the pipeline config so
+    # the LLM doesn't suggest things we already support.
     excluded_keywords = []
-    for section, step_list in config.get("processing", {}).items():
+    for section, step_list in config.get(“processing”, {}).items():
         for step in step_list:
-            excluded_keywords.append(step["name"].lower())
-            excluded_keywords.append(step["description"].lower())
+            excluded_keywords.append(step[“name”].lower())
+            excluded_keywords.append(step[“description”].lower())
 
-    example_data = df.head(2).to_dict(orient="records")
+    example_data = df.head(2).to_dict(orient=”records”)
 
-    prompt = f"""
+    prompt = f”””
         You are a smart data cleaning assistant.
 
         Your job is to suggest 5 **new**, **non-redundant**, and **directly executable** data cleaning actions based on the uploaded CSV file.
@@ -107,8 +181,8 @@ def fetch_llm_suggestions(df, config):
 
         Example output:
         [
-        "Convert 'DOB' column to datetime format",
-        "Drop columns with more than 50% missing values",
+        “Convert 'DOB' column to datetime format”,
+        “Drop columns with more than 50% missing values”,
         ...
         ]
 
@@ -116,7 +190,7 @@ def fetch_llm_suggestions(df, config):
         {json.dumps(example_data, indent=2)}
 
         Return ONLY the JSON array of 5 suggestion strings.
-    """
+    “””
 
     llm_output = call_llm(prompt)
     return json.loads(llm_output)
@@ -145,10 +219,11 @@ with tab1:
         steps = []
         sections = config.get("processing", {})
 
-        if "df" in locals() or "df" in globals():
-            categorical_columns = [col for col in df.columns if df[col].dtype == "object" or df[col].nunique() < 20]
-        else:
-            categorical_columns = []
+        # df is guaranteed to exist here — it was assigned from pd.read_csv above.
+        categorical_columns = [
+            col for col in df.columns
+            if df[col].dtype == "object" or df[col].nunique() < 20
+        ]
 
         for section, step_list in sections.items():
             st.markdown(f"###  {section.replace('_', ' ').title()}")
@@ -552,51 +627,9 @@ def multi_csv_merge_ui(max_files: int = 5):
         st.success("Files successfully merged!")
 
 
-#######################################################
-###################### UI Starts ###################### 
-
-# if "expanded_columns" not in st.session_state:
-#     st.session_state.expanded_columns = set()
-
-# with tab2:
-#     st.header("Metadata Inference & Usability")
-#     multi_csv_merge_ui()
-
-#     if "final_df" in st.session_state:
-#         df = st.session_state.final_df
-
-#         st.subheader("Preview of Uploaded Data")
-#         num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10)
-#         st.dataframe(df.head(num_rows), use_container_width=True)
-
-#         if st.button("🔍 Run Inference on Columns"):
-#             with st.spinner("Inferring column types and suggestions..."):
-#                 st.session_state.metadata_df = analyze_dataframe(df)
-
-#         if "metadata_df" in st.session_state:
-#             metadata_df = st.session_state.metadata_df
-
-#             st.subheader("Column Type Inference")
-#             st.dataframe(metadata_df)
-
-#             st.subheader("Basic Suggested Visualizations")
-#             st.markdown("### Choose columns to visualize")
-            
-#             instance = dtale.show(df, open_browser=False)
-#             d_url = instance._main_url 
-
-#             st.markdown(f"🔗 [Open D-Tale Visualization]({d_url})")
-
-#             selected_cols = st.multiselect(
-#                 "Select columns to show visualizations for",
-#                 options=list(metadata_df["Column"]),
-#                 default=list(metadata_df["Column"])[:0],  
-#                 key="selected_columns"
-#             )
-
-#             for col in selected_cols:
-#                 inferred_type = metadata_df[metadata_df["Column"] == col]["Inferred Type"].values[0]
-#                 render_column_visualization(df, col, inferred_type)
+###############################################################################
+# Tab 2 – Metadata Inference & Usability
+###############################################################################
 
 if "expanded_columns" not in st.session_state:
     st.session_state.expanded_columns = set()
@@ -708,43 +741,8 @@ with tab2:
 
 
 ################################### Custom Cleaning Via LLM ###################################
-            # if "df" not in st.session_state:
-            #     st.session_state.df = df.copy() 
 
-            # st.markdown("## 🛠️ Custom Cleaning via LLM")
-
-            # with st.form(key="custom_cleaning_form"):
-            #     user_instruction = st.text_area("Enter your custom cleaning instruction")
-            #     submitted = st.form_submit_button("Submit to LLM")
-
-            #     if submitted and user_instruction:
-            #         log_event(st.session_state.session_id, "custom_cleaning_prompt", user_instruction)
-
-            #         with st.spinner("Calling LLM and applying changes..."):
-            #             try:
-            #                 cleaned_df, executed_code = custom_cleaning_via_llm(user_instruction, st.session_state.df)
-                            
-            #                 st.session_state.df = cleaned_df
-
-            #                 st.success("✅ Cleaning applied successfully!")
-            #                 st.markdown("### Executed Code")
-            #                 st.code(executed_code, language="python")
-
-            #                 log_event(st.session_state.session_id, "custom_cleaning_success", executed_code)
-
-            #             except Exception as err:
-            #                 st.error(str("❌ Failed to apply cleaning."))
-            #                 st.markdown("#### Error Details")
-            #                 st.error(str(err))
-
-            #                 log_event(st.session_state.session_id, "custom_cleaning_error", str(err))
-
-            # st.subheader("📄 Current Working CSV")
-            # st.dataframe(st.session_state.df)
-
-
-            from vector_store.store import add_suggestion, query_suggestions  # <-- import memory functions
-
+            # add_suggestion / query_suggestions are already imported at the top of the file
             if "df" not in st.session_state:
                 st.session_state.df = df.copy() 
 
@@ -935,8 +933,10 @@ with tab2:
                     st.dataframe(st.session_state.df.head(num_rows), use_container_width=True)
                     
 
-##############################################testing##############################################
-
+###############################################################################
+# Custom Local LLM Panel (outside tabs — always visible)
+# Calls the self-hosted DeepSeek Coder model via REST API (LLM.config.API_URL)
+###############################################################################
 
 st.title("⚡ Custom Trained LLM via API")
 
@@ -987,7 +987,7 @@ feedback_text = st.text_area(
     height=100
 )
 
-import uuid
+# uuid is already imported at the top of the file
 if "session_id" not in st.session_state:
     st.session_state["session_id"] = str(uuid.uuid4())
     log_session(st.session_state["session_id"])
