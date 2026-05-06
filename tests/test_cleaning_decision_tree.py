@@ -131,7 +131,8 @@ class TestParseTreeToGraph:
         known_labels = {n.label for n in nodes}
         for edge in edges:
             assert edge.source in known_labels, f"Edge source '{edge.source}' not in nodes"
-            assert edge.target in known_labels, f"Edge target '{edge.target}' not in nodes"
+            # streamlit_agraph Edge stores the destination as .to, not .target
+            assert edge.to in known_labels, f"Edge target '{edge.to}' not in nodes"
 
     def test_empty_string_returns_empty_collections(self):
         nodes, edges, leaves = parse_tree_to_graph("")
