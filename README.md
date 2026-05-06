@@ -1,6 +1,6 @@
 # Smart CSV Toolkit — LLM‑Assisted CSV Cleaning & Metadata Inference
 
-A Streamlit app that helps you **clean CSVs, infer column semantics, merge multiple files, and generate visualizations** — with optional help from an LLM. It’s designed to be practical and auditable: you always see the code an LLM proposes, you can accept/reject steps, and your actions are **logged to SQLite**.
+A Streamlit app that helps you **clean CSVs, infer column semantics, merge multiple files, and generate visualizations**. It’s designed to be practical and auditable: you always see the code an LLM proposes, you can accept/reject steps, and your actions are **logged to SQLite**.
 
 ## Results / Impact
 - Speeds up exploratory data cleaning with guided, executable steps
