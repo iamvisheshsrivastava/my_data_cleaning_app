@@ -23,6 +23,8 @@ __pycache__/
 # Ignore virtual environments
 venv/
 .venv/
+dataCleaning/
+dataCleaning_new/
 
 # Ignore Streamlit config files
 .streamlit/
@@ -37,8 +39,14 @@ venv/
 # Ignore local test or scratch files
 delete.ipynb
 deleteMe.py
+pytest-cache-files-*/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Ignore generated app artifacts
 DB/auditCSVFiles/
 vector_store/chroma.sqlite3
+vector_store/*/
 .agent/
+.claude/

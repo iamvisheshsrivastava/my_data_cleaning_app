@@ -4,7 +4,41 @@ import os
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "audit.db")
 
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            session_id TEXT PRIMARY KEY,
+            start_time TEXT,
+            user_id TEXT
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS files (
+            file_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            filename TEXT,
+            saved_path TEXT,
+            upload_time TEXT,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
+            event_type TEXT,
+            event_detail TEXT,
+            timestamp TEXT,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
 def log_session(session_id):
+    init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -15,6 +49,7 @@ def log_session(session_id):
     conn.close()
 
 def log_file(session_id, filename, saved_path):
+    init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
@@ -25,6 +60,7 @@ def log_file(session_id, filename, saved_path):
     conn.close()
 
 def log_event(session_id, event_type, event_detail=None):
+    init_db()
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''

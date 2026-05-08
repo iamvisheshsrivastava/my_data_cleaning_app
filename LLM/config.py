@@ -1,1 +1,3 @@
-API_URL = "https://vrqvlim47f0206-8000.proxy.runpod.net/generate"
+import os
+
+API_URL = os.getenv("CUSTOM_LLM_API_URL", "http://localhost:9000/generate")
