@@ -553,9 +553,9 @@ def multi_csv_merge_ui(max_files: int = 5):
     """
     Streamlit helper that
       • lets the user upload up to `max_files` CSVs,
-      • if 1 file   → shows a “Submit” button and stores it as final_df,
+      • if 1 file   → shows a "Submit" button and stores it as final_df,
       • if >1 file  → lets the user configure joins and shows a
-                      “Submit and Merge Files” button,
+                      "Submit and Merge Files" button,
       • clears st.session_state.final_df when the uploader is emptied.
     """
 

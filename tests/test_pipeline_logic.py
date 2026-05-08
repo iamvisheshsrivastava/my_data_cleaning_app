@@ -511,8 +511,3 @@ class TestRunPipeline:
         result = run_pipeline(categorical_df.copy(), steps)
         assert "cat" not in result.columns
         assert "val" in result.columns
-orial_df):
-        steps = [{"name": "One-Hot Encoding", "params": {}}]
-        result = run_pipeline(categorical_df.copy(), steps)
-        assert "cat" not in result.columns
-        assert "val" in result.columns
