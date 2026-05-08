@@ -65,9 +65,9 @@ urllib3.disable_warnings()
 ########################################################################################
 
 def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> str:
-    “””Send a prompt to the Gemini 1.5 Flash model and return the text response.
+    """Send a prompt to the Gemini 1.5 Flash model and return the text response.
 
-    The API key is read from ``st.secrets[“GEMINI_API_KEY”]``; if it is absent
+    The API key is read from ``st.secrets["GEMINI_API_KEY"]``; if it is absent
     the function raises immediately so the caller can surface a clear error to
     the user rather than a cryptic auth failure.
 
@@ -82,17 +82,17 @@ def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> st
 
     Raises:
         ValueError: If ``GEMINI_API_KEY`` is not configured.
-    “””
+    """
     try:
-        api_key = st.secrets.get(“GEMINI_API_KEY”, “”)
+        api_key = st.secrets.get("GEMINI_API_KEY", "")
     except Exception:
-        api_key = “”
+        api_key = ""
 
     if not api_key:
-        raise ValueError(“GEMINI_API_KEY not found in secrets.toml or environment variables”)
+        raise ValueError("GEMINI_API_KEY not found in secrets.toml or environment variables")
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(“gemini-1.5-flash”)
+    model = genai.GenerativeModel("gemini-1.5-flash")
     response = model.generate_content(
         prompt,
         generation_config=genai.types.GenerationConfig(
@@ -104,7 +104,7 @@ def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> st
 
 
 def get_cleaning_code_from_llm(instruction: str, df: pd.DataFrame) -> str:
-    “””Ask the LLM to generate raw Python code that cleans ``df`` in-place.
+    """Ask the LLM to generate raw Python code that cleans ``df`` in-place.
 
     Sends the natural-language instruction together with a 2-row sample of the
     DataFrame so the model has concrete column/type context.  The returned
@@ -112,14 +112,14 @@ def get_cleaning_code_from_llm(instruction: str, df: pd.DataFrame) -> str:
 
     Args:
         instruction: User-written cleaning instruction, e.g.
-            ``”Drop rows where 'Age' is negative”``.
+            ``"Drop rows where 'Age' is negative"``.
         df: The DataFrame to be cleaned (only the first 2 rows are sent).
 
     Returns:
         Raw Python code string that modifies a variable named ``df``.
-    “””
-    example_data = df.head(2).to_dict(orient=”records”)
-    prompt = f”””
+    """
+    example_data = df.head(2).to_dict(orient="records")
+    prompt = f"""
     You are a Python data cleaning assistant.
 
     INSTRUCTION: Convert the following user instruction into Python code that modifies the `df` DataFrame in-place.
@@ -130,16 +130,16 @@ def get_cleaning_code_from_llm(instruction: str, df: pd.DataFrame) -> str:
     - ONLY return raw Python code
 
     Instruction:
-    \”\”\”{instruction}\”\”\”
+    \"\"\"{instruction}\"\"\"
 
     Sample Data:
     {json.dumps(example_data, indent=2)}
-    “””
+    """
     return call_llm(prompt, temperature=0.2, max_tokens=500)
 
 
 def fetch_llm_suggestions(df: pd.DataFrame, config: dict) -> list:
-    “””Request 5 actionable cleaning suggestions for the given DataFrame.
+    """Request 5 actionable cleaning suggestions for the given DataFrame.
 
     Extracts the names and descriptions of already-configured pipeline steps
     from ``config`` and explicitly excludes them from the suggestions to avoid
@@ -154,18 +154,18 @@ def fetch_llm_suggestions(df: pd.DataFrame, config: dict) -> list:
 
     Raises:
         json.JSONDecodeError: If the LLM response cannot be parsed as JSON.
-    “””
+    """
     # Collect all step names/descriptions already in the pipeline config so
     # the LLM doesn't suggest things we already support.
     excluded_keywords = []
-    for section, step_list in config.get(“processing”, {}).items():
+    for section, step_list in config.get("processing", {}).items():
         for step in step_list:
-            excluded_keywords.append(step[“name”].lower())
-            excluded_keywords.append(step[“description”].lower())
+            excluded_keywords.append(step["name"].lower())
+            excluded_keywords.append(step["description"].lower())
 
-    example_data = df.head(2).to_dict(orient=”records”)
+    example_data = df.head(2).to_dict(orient="records")
 
-    prompt = f”””
+    prompt = f"""
         You are a smart data cleaning assistant.
 
         Your job is to suggest 5 **new**, **non-redundant**, and **directly executable** data cleaning actions based on the uploaded CSV file.
@@ -173,7 +173,7 @@ def fetch_llm_suggestions(df: pd.DataFrame, config: dict) -> list:
         IMPORTANT:
         - ONLY suggest actions that can be applied using the available data — no vague, manual, or unverifiable suggestions.
         - Do NOT suggest anything already covered in: {excluded_keywords}
-        - Do NOT include ideas like “flag suspicious data” or “verify with external sources”
+        - Do NOT include ideas like "flag suspicious data" or "verify with external sources"
 
         Format:
         - Return a JSON array of 5 short, actionable suggestion **strings**
@@ -181,8 +181,8 @@ def fetch_llm_suggestions(df: pd.DataFrame, config: dict) -> list:
 
         Example output:
         [
-        “Convert 'DOB' column to datetime format”,
-        “Drop columns with more than 50% missing values”,
+        "Convert 'DOB' column to datetime format",
+        "Drop columns with more than 50% missing values",
         ...
         ]
 
@@ -190,7 +190,7 @@ def fetch_llm_suggestions(df: pd.DataFrame, config: dict) -> list:
         {json.dumps(example_data, indent=2)}
 
         Return ONLY the JSON array of 5 suggestion strings.
-    “””
+    """
 
     llm_output = call_llm(prompt)
     return json.loads(llm_output)
@@ -551,9 +551,9 @@ def multi_csv_merge_ui(max_files: int = 5):
     """
     Streamlit helper that
       • lets the user upload up to `max_files` CSVs,
-      • if 1 file   → shows a “Submit” button and stores it as final_df,
+      • if 1 file   → shows a "Submit" button and stores it as final_df,
       • if >1 file  → lets the user configure joins and shows a
-                      “Submit and Merge Files” button,
+                      "Submit and Merge Files" button,
       • clears st.session_state.final_df when the uploader is emptied.
     """
 
