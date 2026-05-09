@@ -37,6 +37,8 @@ jobs:
     steps:
       - name: Deploy to server over SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -53,4 +55,4 @@ jobs:
             cd "$APP_DIR"
             git pull
 
-            docker compose up -d --build --remove-orphans
+            GEMINI_API_KEY=$GEMINI_API_KEY docker compose up -d --build --remove-orphans
