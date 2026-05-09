@@ -3,11 +3,26 @@ FROM python:3.11-bullseye
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     STREAMLIT_SERVER_ADDRESS=0.0.0.0 \
-    STREAMLIT_SERVER_PORT=8501
+    STREAMLIT_SERVER_PORT=8501 \
+    LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 
 WORKDIR /app
 
+# Build and install SQLite 3.45.0 to fix ChromaDB compatibility
 RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential gcc wget \
+    && cd /tmp \
+    && wget https://www.sqlite.org/2024/sqlite-autoconf-3450000.tar.gz \
+    && tar xzf sqlite-autoconf-3450000.tar.gz \
+    && cd sqlite-autoconf-3450000 \
+    && ./configure --prefix=/usr/local \
+    && make \
+    && make install \
+    && ldconfig \
+    && cd /app \
+    && rm -rf /tmp/sqlite-* \
+    && apt-get remove -y build-essential gcc wget \
     && apt-get install -y --no-install-recommends build-essential gcc \
     && rm -rf /var/lib/apt/lists/*
 
