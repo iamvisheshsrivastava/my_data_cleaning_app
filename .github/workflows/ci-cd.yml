@@ -56,4 +56,7 @@ jobs:
             cd "$APP_DIR"
             git pull
 
-            GEMINI_API_KEY=$GEMINI_API_KEY docker compose up -d --build --remove-orphans
+            # Update .env file with latest API key from GitHub Secrets
+            echo "GEMINI_API_KEY=$GEMINI_API_KEY" > .env
+
+            docker compose up -d --build --remove-orphans
