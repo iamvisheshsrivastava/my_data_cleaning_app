@@ -44,6 +44,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
+          passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
           script: |
             set -e
             APP_DIR=${{ secrets.DEPLOY_PATH }}
