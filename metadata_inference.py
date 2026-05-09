@@ -1,4 +1,5 @@
 import logging
+import os
 import pandas as pd
 import numpy as np
 import re
@@ -39,6 +40,11 @@ import contextlib
 import requests
 import urllib3
 urllib3.disable_warnings()
+
+try:
+    ENGLISH_STOPWORDS = set(stopwords.words("english"))
+except LookupError:
+    ENGLISH_STOPWORDS = set()
 
 #nltk.download("stopwords")
 #english_stops = set(stopwords.words("english"))
@@ -423,10 +429,6 @@ You are a Python data cleaning assistant.
 Your task is to generate Python code that modifies the `df` DataFrame *in-place* based on the user's instruction. You have access to the full dataset below in CSV format. 
 
 Make sure the code:
-- Assumes that a pandas DataFrame named `df` already exists.
-- Can handle all rows of the dataset, not just a sample.
-- Does not include any explanations, comments, or markdown.
-- Only returns a JSON object of the form: {{ "code": "<your_python_code>" }}
 
 USER INSTRUCTION:
 {user_instruction}
@@ -439,11 +441,25 @@ PROMPT LENGTH (characters): {len(user_instruction) + len(formatted_df)}
 
     try:
         llm_response = call_llm(prompt)
-        code_data = json.loads(llm_response)
-        code_str = code_data.get("code", "")
+        llm_response = llm_response.strip()
+
+        if not llm_response:
+            raise ValueError("LLM returned an empty response.")
+
+        cleaned_response = re.sub(r"^```(?:json|python)?\s*|\s*```$", "", llm_response, flags=re.IGNORECASE | re.DOTALL).strip()
+
+        code_str = ""
+        try:
+            code_data = json.loads(cleaned_response)
+            if isinstance(code_data, dict):
+                code_str = str(code_data.get("code", "")).strip()
+            elif isinstance(code_data, str):
+                code_str = code_data.strip()
+        except json.JSONDecodeError:
+            code_str = cleaned_response
 
         if not code_str:
-            raise ValueError("No 'code' key found in LLM response.")
+            raise ValueError("LLM response did not contain executable code.")
 
         global_vars = {
             "pd": pd,
@@ -460,8 +476,8 @@ PROMPT LENGTH (characters): {len(user_instruction) + len(formatted_df)}
             "nltk": nltk,
             "geopy": __import__("geopy"),  
             "geodesic": geodesic,
-            #"stop_words": english_stops,
-            "stops": set(stopwords.words("english")),
+            # Fall back to an empty set if the NLTK corpus is unavailable.
+            "stops": ENGLISH_STOPWORDS,
             "word_tokenize": word_tokenize,
             "transformers": __import__("transformers"),
             "tldextract": tldextract
@@ -482,12 +498,14 @@ def call_llm(prompt: str, temperature=0.3, max_tokens=700) -> str:
         api_key = st.secrets.get("GEMINI_API_KEY", "")
     except:
         api_key = ""
+
+    api_key = api_key or os.getenv("GEMINI_API_KEY", "")
     
     if not api_key:
         raise ValueError("GEMINI_API_KEY not found in secrets.toml or environment variables")
     
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
     response = model.generate_content(
         prompt,
         generation_config=genai.types.GenerationConfig(

@@ -9,6 +9,7 @@ tldextract
 requests
 plotly
 matplotlib
+python-dotenv
 seaborn
 wordcloud
 streamlit-agraph

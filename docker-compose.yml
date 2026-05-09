@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    container_name: smart-csv-toolkit
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_SERVER_PORT=8501
+    volumes:
+      - ./DB:/app/DB
+      - ./vector_store:/app/vector_store
+    restart: unless-stopped

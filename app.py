@@ -21,6 +21,11 @@ via REST API, and a feedback widget.
 """
 
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 import re
 import io
 import uuid
@@ -94,7 +99,7 @@ def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> st
         raise ValueError("GEMINI_API_KEY not found in secrets.toml or environment variables")
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
     response = model.generate_content(
         prompt,
         generation_config=genai.types.GenerationConfig(
@@ -152,10 +157,7 @@ def fetch_llm_suggestions(df: pd.DataFrame, config: dict) -> list:
         config: The parsed ``table_steps.json`` configuration dict.
 
     Returns:
-        A list of 5 suggestion strings as returned by the LLM.
-
-    Raises:
-        json.JSONDecodeError: If the LLM response cannot be parsed as JSON.
+        A list of 5 suggestion strings.
     """
     # Collect all step names/descriptions already in the pipeline config so
     # the LLM doesn't suggest things we already support.
@@ -178,24 +180,47 @@ def fetch_llm_suggestions(df: pd.DataFrame, config: dict) -> list:
         - Do NOT include ideas like "flag suspicious data" or "verify with external sources"
 
         Format:
-        - Return a JSON array of 5 short, actionable suggestion **strings**
-        - Do NOT include IDs, explanations, or markdown — just plain text
+        - Return exactly 5 short, actionable suggestions
+        - Put each suggestion on its own line
+        - Do NOT include numbering, JSON, markdown, explanations, or extra text
 
         Example output:
-        [
-        "Convert 'DOB' column to datetime format",
-        "Drop columns with more than 50% missing values",
-        ...
-        ]
+        Convert 'DOB' column to datetime format
+        Drop columns with more than 50% missing values
+        Normalize numeric columns to a 0-1 range
+        Trim whitespace in string columns
+        One-hot encode categorical columns
 
         Here is a preview of the data (first 2 rows):
         {json.dumps(example_data, indent=2)}
 
-        Return ONLY the JSON array of 5 suggestion strings.
+        Return ONLY the 5 suggestions.
     """
 
     llm_output = call_llm(prompt)
-    return json.loads(llm_output)
+    cleaned_output = re.sub(r"^```(?:json)?\s*|\s*```$", "", llm_output.strip(), flags=re.IGNORECASE | re.DOTALL)
+
+    try:
+        parsed_output = json.loads(cleaned_output)
+        if isinstance(parsed_output, list):
+            suggestions = [str(item).strip() for item in parsed_output if str(item).strip()]
+            if suggestions:
+                return suggestions[:5]
+    except json.JSONDecodeError:
+        pass
+
+    suggestions = []
+    for line in cleaned_output.splitlines():
+        suggestion = re.sub(r"^[-*•]\s*", "", line.strip())
+        suggestion = re.sub(r"^\d+[.)]\s*", "", suggestion)
+        suggestion = suggestion.strip().strip('"').strip("'")
+        if suggestion:
+            suggestions.append(suggestion)
+
+    if not suggestions:
+        raise ValueError("LLM did not return parseable suggestions")
+
+    return suggestions[:5]
 
 
 with open("table_steps.json", "r") as f:
@@ -214,7 +239,7 @@ with tab1:
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
         st.subheader("Preview of Uploaded Data")
-        num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10)
+        num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10, key="cleaner_preview_rows")
         st.dataframe(df.head(num_rows), use_container_width=True)
 
         st.header("Step 2: Select and Configure Processing Steps")
@@ -664,7 +689,7 @@ with tab2:
         log_event(st.session_state.session_id, "file_upload", f"Saved CSV to {file_path}")
 
         st.subheader("Preview of Uploaded Data")
-        num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10)
+        num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10, key="metadata_preview_rows")
         st.dataframe(df.head(num_rows), use_container_width=True)
 
         if st.button("🔍 Run Inference on Columns"):

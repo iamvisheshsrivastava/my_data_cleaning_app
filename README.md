@@ -123,6 +123,7 @@ pip install -r requirements.txt
 **Google Generative AI / Gemini API (used by `call_llm`)**
 
 * Create an account at [Google AI Studio](https://aistudio.google.com/apikey) and get an API key.
+* Copy [`.env.example`](.env.example) to `.env` and fill in the local values for development.
 * Add the API key to your `.streamlit/secrets.toml` file:
 
 ```toml
@@ -274,6 +275,20 @@ Each `option` supports `data_type` (`int`, `float`, `str`, `select`) and optiona
 * **VS Code Dev Container**: Open the repo in VS Code → "Reopen in Container" to develop in a preconfigured environment (see `.devcontainer`).
 * **Styling/UX**: Streamlit components, Plotly charts, Matplotlib/Seaborn for custom visuals, AGraph for the interactive tree, and D‑Tale for data exploration.
 * **Windows paths**: The default audit path is Windows‑specific; switch to `pathlib.Path` for portability as shown above.
+
+---
+
+## 🐳 Docker & CI/CD
+
+* This app can run as **one container** because the current codebase is a Streamlit app only.
+* Use `docker-compose.yml` to run it locally or on a server:
+
+```bash
+docker compose up --build -d
+```
+
+* The GitHub Actions workflow in `.github/workflows/ci-cd.yml` runs syntax checks on every PR/push and deploys on `main` by SSHing into a server and running `docker compose up -d --build`.
+* If you later add a FastAPI backend, then splitting into **two containers** makes sense. For now, one container is enough.
 
 ---
 
