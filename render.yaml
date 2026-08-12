@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: smart-csv-toolkit
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    autoDeployTrigger: commit
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
