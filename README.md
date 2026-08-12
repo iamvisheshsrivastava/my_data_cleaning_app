@@ -1,5 +1,7 @@
 # Smart CSV Toolkit — LLM‑Assisted CSV Cleaning & Metadata Inference
 
+**Live demo → https://smart-csv-toolkit.onrender.com/**
+
 A Streamlit app that helps you **clean CSVs, infer column semantics, merge multiple files, and generate visualizations**. It’s designed to be practical and auditable: you always see the code an LLM proposes, you can accept/reject steps, and your actions are **logged to SQLite**.
 
 ## Results / Impact
@@ -168,6 +170,18 @@ The app now resolves this path relative to `app.py`, so the default setup is por
 streamlit run app.py
 ```
 
+### 5) Browser E2E Tests
+
+This repo now includes a browser smoke test for the main Streamlit cleaning flow.
+
+```bash
+pip install -r requirements.txt
+python -m playwright install chromium
+pytest tests/e2e -v
+```
+
+The browser test launches Streamlit locally, uploads a sample CSV, enables a built-in cleaning step, and verifies that the cleaned output renders in the UI.
+
 ---
 
 ## 🧩 Usage Guide
@@ -281,13 +295,14 @@ Each `option` supports `data_type` (`int`, `float`, `str`, `select`) and optiona
 ## 🐳 Docker & CI/CD
 
 * This app can run as **one container** because the current codebase is a Streamlit app only.
-* Use `docker-compose.yml` to run it locally or on a server:
+* **Live deployment:** hosted on [Render](https://render.com)'s free tier via `render.yaml` + `Dockerfile` — Render auto-redeploys on every push to `main`. The app previously SSH-deployed to a self-hosted DigitalOcean droplet; that droplet has been decommissioned.
+* For local Docker use, `docker-compose.yml` still works:
 
 ```bash
 docker compose up --build -d
 ```
 
-* The GitHub Actions workflow in `.github/workflows/ci-cd.yml` runs syntax checks on every PR/push and deploys on `main` by SSHing into a server and running `docker compose up -d --build`.
+* The GitHub Actions workflow in `.github/workflows/ci-cd.yml` runs syntax checks on every PR/push. Its SSH-deploy step targets the retired droplet and is no longer functional — actual deployment now happens via Render's own auto-deploy, not this workflow.
 * If you later add a FastAPI backend, then splitting into **two containers** makes sense. For now, one container is enough.
 
 ---
