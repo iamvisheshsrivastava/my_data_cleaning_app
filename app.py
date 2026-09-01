@@ -21,6 +21,9 @@ via REST API, and a feedback widget.
 """
 
 import os
+import socket
+import ipaddress
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -68,6 +71,59 @@ urllib3.disable_warnings()
 ########################################################################################
 ############################CSV Cleaning with AI Suggestions############################
 ########################################################################################
+
+########################################################################################
+######################################Upload limits######################################
+########################################################################################
+
+# Application-level guardrails, well below Streamlit's default 200MB
+# per-file uploader cap, to avoid exhausting memory on the deployed instance.
+MAX_UPLOAD_MB = 25
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_ROWS = 500_000
+
+
+def check_upload_size(size_bytes: int, label: str = "file") -> bool:
+    """
+    Return True if size_bytes is within MAX_UPLOAD_BYTES, otherwise show an
+    st.error and return False.
+    """
+    if size_bytes is not None and size_bytes > MAX_UPLOAD_BYTES:
+        st.error(
+            f"❌ {label} is too large ({size_bytes / (1024 * 1024):.1f} MB). "
+            f"The maximum allowed size is {MAX_UPLOAD_MB} MB."
+        )
+        return False
+    return True
+
+
+def check_row_count(df: pd.DataFrame, label: str = "file") -> bool:
+    """
+    Return True if df has at most MAX_ROWS rows, otherwise show an st.error
+    and return False.
+    """
+    if len(df) > MAX_ROWS:
+        st.error(
+            f"❌ {label} has too many rows ({len(df):,}). "
+            f"The maximum allowed is {MAX_ROWS:,} rows."
+        )
+        return False
+    return True
+
+
+def sanitize_for_csv(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Return a copy of df with any string cell that starts with '=', '+', '-',
+    '@', tab, or carriage return prefixed with a single quote, so spreadsheet
+    apps (Excel/LibreOffice/Google Sheets) treat it as literal text instead
+    of a formula. Mitigates CSV/DDE formula injection on export.
+    """
+    def esc(v):
+        if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            return "'" + v
+        return v
+    return df.applymap(esc)
+
 
 def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> str:
     """Send a prompt to the Gemini 1.5 Flash model and return the text response.
@@ -237,7 +293,11 @@ with tab1:
     uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
 
     if uploaded_file:
+        if not check_upload_size(getattr(uploaded_file, "size", None), label="Uploaded file"):
+            st.stop()
         df = pd.read_csv(uploaded_file)
+        if not check_row_count(df, label="Uploaded file"):
+            st.stop()
         st.subheader("Preview of Uploaded Data")
         num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10, key="cleaner_preview_rows")
         st.dataframe(df.head(num_rows), use_container_width=True)
@@ -397,7 +457,7 @@ with tab1:
                     max_height = 300
                     st.dataframe(visible_rows, use_container_width=True, height=min(max(len(visible_rows) * row_height, min_height), max_height))
 
-                csv = cleaned_df.to_csv(index=False).encode("utf-8")
+                csv = sanitize_for_csv(cleaned_df).to_csv(index=False).encode("utf-8")
                 st.download_button("Download Cleaned CSV", data=csv, file_name="cleaned_output.csv", mime="text/csv")
 
     
@@ -406,11 +466,52 @@ with tab1:
 ##################################Metadata Inference & Usability##################################
 ##################################################################################################
 
+def is_safe_url(url: str) -> bool:
+    """
+    Validate that a URL is safe to fetch server-side: scheme must be
+    http/https, and the resolved hostname must not point at a private,
+    loopback, link-local, or otherwise reserved IP range. This mitigates
+    SSRF via URLs embedded in uploaded CSV cell content (e.g. cloud
+    metadata endpoints or internal services).
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        # Resolve all addresses for the hostname and reject if any of them
+        # are private/reserved, to guard against DNS rebinding as well.
+        addr_infos = socket.getaddrinfo(hostname, None)
+        if not addr_infos:
+            return False
+        for info in addr_infos:
+            ip_str = info[4][0]
+            ip = ipaddress.ip_address(ip_str)
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def render_image_urls(urls):
     st.markdown("### 🖼️ Image Previews")
     for url in urls:
         try:
-            response = requests.get(url)
+            if not is_safe_url(url):
+                st.warning(f"Blocked unsafe or non-public URL: {url}")
+                continue
+            response = requests.get(url, timeout=10)
             img = Image.open(BytesIO(response.content))
             st.image(img, caption=url, use_column_width=True)
         except:
@@ -448,6 +549,8 @@ def render_video_urls(urls):
 
 def fetch_and_summarize_url(url: str, instruction: str, llm_func) -> str:
     try:
+        if not is_safe_url(url):
+            return f"❌ Blocked unsafe or non-public URL: {url}"
         response = requests.get(url, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         text = soup.get_text(separator=' ', strip=True)[:1500]
@@ -599,8 +702,36 @@ def multi_csv_merge_ui(max_files: int = 5):
         st.warning(f"Please upload at most {max_files} files.")
         return
 
+    # Per-file and aggregate size guard, since up to `max_files` files can be
+    # uploaded and read into memory in a single rerun.
+    sizes = [getattr(f, "size", 0) or 0 for f in uploaded_files]
+    for f, size in zip(uploaded_files, sizes):
+        if not check_upload_size(size, label=f"File '{f.name}'"):
+            return
+    total_size = sum(sizes)
+    if total_size > MAX_UPLOAD_BYTES:
+        st.error(
+            f"❌ Combined size of uploaded files is too large "
+            f"({total_size / (1024 * 1024):.1f} MB). The maximum allowed "
+            f"combined size is {MAX_UPLOAD_MB} MB."
+        )
+        return
+
     dataframes  = [pd.read_csv(f) for f in uploaded_files]
     file_names  = [f.name for f in uploaded_files]
+
+    total_rows = 0
+    for name, d in zip(file_names, dataframes):
+        if not check_row_count(d, label=f"File '{name}'"):
+            return
+        total_rows += len(d)
+    if total_rows > MAX_ROWS:
+        st.error(
+            f"❌ Combined row count of uploaded files is too large "
+            f"({total_rows:,}). The maximum allowed combined total is "
+            f"{MAX_ROWS:,} rows."
+        )
+        return
 
     if len(dataframes) == 1:
         if st.button("Submit"):
@@ -779,7 +910,7 @@ with tab2:
 
             # 🔹 Show general past suggestions immediately
             if use_memory:
-                related = query_suggestions("cleaning", n_results=5)  # dummy query to fetch some memory
+                related = query_suggestions("cleaning", st.session_state.session_id, n_results=5)  # dummy query to fetch some memory
                 if related and "documents" in related and related["documents"][0]:
                     st.markdown("### 📌 Related Past Suggestions (general)")
                     for idx, doc in enumerate(related["documents"][0], start=1):
@@ -796,7 +927,7 @@ with tab2:
 
                     # 🔹 Step 1: Retrieve related past suggestions for this query
                     if use_memory:
-                        related = query_suggestions(user_instruction, n_results=3)
+                        related = query_suggestions(user_instruction, st.session_state.session_id, n_results=3)
                         if related and "documents" in related and related["documents"][0]:
                             st.markdown("### 📌 Related Past Suggestions (for your query)")
                             for idx, doc in enumerate(related["documents"][0], start=1):
@@ -1033,7 +1164,7 @@ with tab3:
 
     if st.button("Search Memory"):
         if search_query.strip():
-            results = query_suggestions(search_query, n_results=10)
+            results = query_suggestions(search_query, st.session_state["session_id"], n_results=10)
             if results and "documents" in results and results["documents"][0]:
                 st.success(f"Found {len(results['documents'][0])} suggestions")
                 for idx, doc in enumerate(results["documents"][0], start=1):
@@ -1044,10 +1175,10 @@ with tab3:
                 st.info("⚠️ No suggestions found for this query.")
 
     if st.button("Show All Memory"):
-        count = count_suggestions()
-        st.write(f"Total suggestions stored: {count}")
+        count = count_suggestions(st.session_state["session_id"])
+        st.write(f"Total suggestions stored for your session: {count}")
         if count > 0:
-            all_data = get_all_suggestions()
+            all_data = get_all_suggestions(st.session_state["session_id"])
             for idx, doc in enumerate(all_data["documents"], start=1):
                 meta = all_data["metadatas"][idx-1]
                 st.markdown(f"**{idx}. {doc}**")

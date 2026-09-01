@@ -29,12 +29,19 @@ def add_suggestion(suggestion: str, metadata: dict):
         ids=[metadata["id"]]
     )
 
-def query_suggestions(query: str, n_results=3):
+def query_suggestions(query: str, session_id: str, n_results=3, include_seed=True):
     """
-    Query similar past cleaning suggestions.
-    Returns a dictionary with 'documents' and 'metadatas'.
+    Query similar past cleaning suggestions, scoped to the given session_id
+    so one user's memory is never visible to another session.
+
+    If include_seed is True, the shared "seed" example suggestions (which
+    contain no user data) are also included as general tips.
     """
-    return collection.query(query_texts=[query], n_results=n_results)
+    if include_seed:
+        where = {"session_id": {"$in": [session_id, "seed"]}}
+    else:
+        where = {"session_id": session_id}
+    return collection.query(query_texts=[query], n_results=n_results, where=where)
 
 # --- Seed dummy suggestions (only if DB is empty) ---
 if collection.count() == 0:
@@ -48,14 +55,15 @@ if collection.count() == 0:
         collection.add(documents=[text], metadatas=[meta], ids=[meta["id"]])
     print("✅ Seeded dummy suggestions into vector DB")
 
-def get_all_suggestions():
+def get_all_suggestions(session_id: str):
     """
-    Return all stored suggestions and their metadata.
+    Return all stored suggestions and their metadata for the given
+    session_id only, so one user's memory is never visible to another.
     """
-    return collection.get()
+    return collection.get(where={"session_id": session_id})
 
-def count_suggestions():
+def count_suggestions(session_id: str):
     """
-    Return total number of stored suggestions.
+    Return total number of stored suggestions for the given session_id only.
     """
-    return collection.count()
+    return collection.get(where={"session_id": session_id}).get("ids", []).__len__()

@@ -1,0 +1,5 @@
+[server]
+# Application-level guard (app.py MAX_UPLOAD_MB) additionally caps this at 25MB;
+# this keeps Streamlit's own uploader limit close to that, rather than the
+# 200MB default, as defense in depth.
+maxUploadSize = 25
