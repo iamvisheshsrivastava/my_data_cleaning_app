@@ -16,7 +16,7 @@ streamlit-agraph
 pyvis
 beautifulsoup4
 Pillow
-google-generativeai
+openai
 transformers
 torch
 joblib

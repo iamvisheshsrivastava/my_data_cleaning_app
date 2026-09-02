@@ -15,7 +15,7 @@ import seaborn as sns
 logger = logging.getLogger(__name__)
 
 from typing import Tuple
-import google.generativeai as genai
+from openai import OpenAI
 
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, Binarizer
@@ -495,25 +495,24 @@ PROMPT LENGTH (characters): {len(user_instruction) + len(formatted_df)}
 def call_llm(prompt: str, temperature=0.3, max_tokens=700) -> str:
     import streamlit as st
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY", "")
+        api_key = st.secrets.get("OPENROUTER_API_KEY", "")
     except:
         api_key = ""
 
-    api_key = api_key or os.getenv("GEMINI_API_KEY", "")
-    
+    api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
+
     if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in secrets.toml or environment variables")
-    
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.types.GenerationConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        )
+        raise ValueError("OPENROUTER_API_KEY not found in secrets.toml or environment variables")
+
+    client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+    model_name = os.getenv("OPENROUTER_MODEL", "z-ai/glm-4.6")
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
-    return response.text.strip()
+    return response.choices[0].message.content.strip()
 
 def execute_plot_code(code: str, df: pd.DataFrame):
     """

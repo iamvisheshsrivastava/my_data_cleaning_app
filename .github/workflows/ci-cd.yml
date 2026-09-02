@@ -43,7 +43,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
           passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
-          envs: GEMINI_API_KEY
+          envs: OPENROUTER_API_KEY
           script: |
             set -e
             APP_DIR=${{ secrets.DEPLOY_PATH }}
@@ -56,6 +56,6 @@ jobs:
             git pull
 
             # Update .env file with latest API key from GitHub Secrets
-            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+            echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" > .env
 
             docker compose up -d --build --remove-orphans

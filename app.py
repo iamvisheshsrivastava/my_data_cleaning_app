@@ -51,7 +51,7 @@ from PIL import Image
 from bs4 import BeautifulSoup
 from wordcloud import WordCloud
 
-import google.generativeai as genai
+from openai import OpenAI
 from streamlit_agraph import agraph, Config
 import streamlit.components.v1 as components
 
@@ -126,12 +126,14 @@ def sanitize_for_csv(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> str:
-    """Send a prompt to the Gemini 1.5 Flash model and return the text response.
+    """Send a prompt to the OpenRouter-hosted model and return the text response.
 
-    The API key is read from ``st.secrets["GEMINI_API_KEY"]`` or the
-    ``GEMINI_API_KEY`` environment variable; if it is absent
+    The API key is read from ``st.secrets["OPENROUTER_API_KEY"]`` or the
+    ``OPENROUTER_API_KEY`` environment variable; if it is absent
     the function raises immediately so the caller can surface a clear error to
-    the user rather than a cryptic auth failure.
+    the user rather than a cryptic auth failure. The model used is
+    configurable via the ``OPENROUTER_MODEL`` environment variable and
+    defaults to ``z-ai/glm-4.6``.
 
     Args:
         prompt: Full prompt string to send to the model.
@@ -143,27 +145,26 @@ def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> st
         Stripped text response from the model.
 
     Raises:
-        ValueError: If ``GEMINI_API_KEY`` is not configured.
+        ValueError: If ``OPENROUTER_API_KEY`` is not configured.
     """
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY", "")
+        api_key = st.secrets.get("OPENROUTER_API_KEY", "")
     except Exception:
         api_key = ""
-    api_key = api_key or os.getenv("GEMINI_API_KEY", "")
+    api_key = api_key or os.getenv("OPENROUTER_API_KEY", "")
 
     if not api_key:
-        raise ValueError("GEMINI_API_KEY not found in secrets.toml or environment variables")
+        raise ValueError("OPENROUTER_API_KEY not found in secrets.toml or environment variables")
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.types.GenerationConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        )
+    client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
+    model_name = os.getenv("OPENROUTER_MODEL", "z-ai/glm-4.6")
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
-    return response.text.strip()
+    return response.choices[0].message.content.strip()
 
 
 def get_cleaning_code_from_llm(instruction: str, df: pd.DataFrame) -> str:
