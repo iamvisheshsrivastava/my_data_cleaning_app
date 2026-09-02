@@ -61,7 +61,6 @@ from cleaningDecisionTree import render_pyvis_tree, render_agraph_tree
 from pyvis.network import Network
 from DB.log_to_db import log_session, log_file, log_event
 from datetime import datetime
-import LLM.config
 import time
 import urllib3
 from vector_store.store import query_suggestions, add_suggestion, get_all_suggestions, count_suggestions
@@ -1093,8 +1092,11 @@ with tab2:
                     
 
 ###############################################################################
-# Custom Local LLM Panel (outside tabs — always visible)
-# Calls the self-hosted DeepSeek Coder model via REST API (LLM.config.API_URL)
+# Custom LLM Panel (outside tabs — always visible)
+# Uses the same OpenRouter-hosted model as the rest of the app (call_llm()) -
+# this used to call a self-hosted model at LLM.config.API_URL
+# (localhost:9000), which was never reachable from the deployed container and
+# always failed with a connection-refused error in production.
 ###############################################################################
 
 st.title("⚡ Custom Trained LLM via API")
@@ -1108,19 +1110,15 @@ user_input = st.text_area(
 
 if st.button("Submit", key="llm_submit_button"):
     if user_input.strip():
-        with st.spinner("Querying DeepSeek Coder via API..."):
+        with st.spinner("Querying the LLM..."):
             try:
                 start_time = time.time()
-                response = requests.post(LLM.config.API_URL, json={"prompt": user_input}, verify=False)
+                result = call_llm(user_input, temperature=0.3, max_tokens=700)
                 end_time = time.time()
-                
-                if response.status_code == 200:
-                    result = response.json().get("response", "[No response]")
-                    st.markdown("**LLM Response:**")
-                    st.text_area("Output", result, height=250, key="llm_output_area")
-                    st.success(f"Time taken: {end_time - start_time:.2f} seconds")
-                else:
-                    st.error(str(f"API returned status code: {response.status_code}"))
+
+                st.markdown("**LLM Response:**")
+                st.text_area("Output", result, height=250, key="llm_output_area")
+                st.success(f"Time taken: {end_time - start_time:.2f} seconds")
             except Exception as e:
                 st.error(str(f"Error contacting LLM API: {e}"))
     else:
