@@ -124,7 +124,7 @@ def sanitize_for_csv(df: pd.DataFrame) -> pd.DataFrame:
     return df.applymap(esc)
 
 
-def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> str:
+def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 2000) -> str:
     """Send a prompt to the OpenRouter-hosted model and return the text response.
 
     The API key is read from ``st.secrets["OPENROUTER_API_KEY"]`` or the
@@ -163,7 +163,13 @@ def call_llm(prompt: str, temperature: float = 0.3, max_tokens: int = 700) -> st
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    return response.choices[0].message.content.strip()
+    # Reasoning models (GLM-4.6 included) can spend the whole max_tokens
+    # budget on hidden reasoning and return content: None for longer/more
+    # complex prompts instead of the expected text.
+    content = response.choices[0].message.content
+    if not content:
+        raise ValueError("The model didn't return a response (it may have run out of output budget) - try a shorter prompt")
+    return content.strip()
 
 
 def get_cleaning_code_from_llm(instruction: str, df: pd.DataFrame) -> str:

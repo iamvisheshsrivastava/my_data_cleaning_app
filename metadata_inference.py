@@ -492,7 +492,7 @@ PROMPT LENGTH (characters): {len(user_instruction) + len(formatted_df)}
     except Exception as e:
         raise RuntimeError(f"Failed to apply LLM cleaning: {e}")
 
-def call_llm(prompt: str, temperature=0.3, max_tokens=700) -> str:
+def call_llm(prompt: str, temperature=0.3, max_tokens=2000) -> str:
     import streamlit as st
     try:
         api_key = st.secrets.get("OPENROUTER_API_KEY", "")
@@ -512,7 +512,10 @@ def call_llm(prompt: str, temperature=0.3, max_tokens=700) -> str:
         temperature=temperature,
         max_tokens=max_tokens,
     )
-    return response.choices[0].message.content.strip()
+    content = response.choices[0].message.content
+    if not content:
+        raise ValueError("The model didn't return a response (it may have run out of output budget) - try a shorter prompt")
+    return content.strip()
 
 def execute_plot_code(code: str, df: pd.DataFrame):
     """
