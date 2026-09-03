@@ -304,6 +304,23 @@ with tab1:
         df = pd.read_csv(uploaded_file)
         if not check_row_count(df, label="Uploaded file"):
             st.stop()
+
+        # Reset stale results from a previously uploaded file. Without this,
+        # replacing the uploaded file left st.session_state.cleaned_df (and
+        # the LLM suggestion state) pointing at the OLD file's cleaned
+        # output — the preview above showed the new file, but "Download
+        # Cleaned CSV" would still serve the previous file's result until
+        # "Run Cleaning Pipeline" was clicked again.
+        file_fingerprint = (uploaded_file.name, getattr(uploaded_file, "size", None))
+        if st.session_state.get("_tab1_file_fingerprint") != file_fingerprint:
+            st.session_state["_tab1_file_fingerprint"] = file_fingerprint
+            st.session_state.pop("cleaned_df", None)
+            st.session_state.llm_suggestions = []
+            st.session_state.suggested_once = False
+            st.session_state.clicked_llm = False
+            st.session_state.selected_suggestion = ""
+            st.session_state.custom_suggestion = ""
+
         st.subheader("Preview of Uploaded Data")
         num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10, key="cleaner_preview_rows")
         st.dataframe(df.head(num_rows), use_container_width=True)
@@ -605,14 +622,32 @@ def render_column_visualization(df: pd.DataFrame, col: str, inferred_type: str):
                     st.pyplot(fig)
 
             elif inferred_type == "Datetime":
-                df[col] = pd.to_datetime(df[col], errors='coerce')
-                timeline = df.groupby(df[col].dt.date).size().reset_index(name='Count')
+                # Parse into a local Series for charting only — do NOT assign
+                # back into df[col]. df is the caller's live DataFrame (e.g.
+                # st.session_state.final_df), so writing here would silently
+                # convert the column's dtype (and coerce unparseable values
+                # to NaT, i.e. drop data) as a side effect of just viewing a
+                # chart, persisting even if the user never asked to clean it.
+                parsed_dates = pd.to_datetime(df[col], errors='coerce')
+                timeline = parsed_dates.dt.date.value_counts().sort_index().reset_index()
+                timeline.columns = [col, 'Count']
                 fig = px.line(timeline, x=col, y='Count')
                 st.plotly_chart(fig)
 
             elif inferred_type == "GPS Coordinates":
-                df[['lat', 'lon']] = df[col].str.split(",", expand=True).astype(float)
-                st.map(df[['lat', 'lon']])
+                # Same rule as above: split into a standalone DataFrame
+                # instead of writing 'lat'/'lon' columns into the caller's
+                # df. Split on the same delimiter set the type-inference
+                # regex accepts (comma, semicolon, or whitespace) rather
+                # than comma only, so semicolon/space-separated coordinates
+                # don't fail here.
+                coords = df[col].dropna().astype(str).str.split(r'[,;\s]+', expand=True)
+                if coords.shape[1] >= 2:
+                    coords = coords.iloc[:, :2].astype(float)
+                    coords.columns = ['lat', 'lon']
+                    st.map(coords)
+                else:
+                    st.warning("Could not split GPS coordinates into lat/lon.")
 
             elif inferred_type in ["Boolean", "Ordinal", "Percentage", "Currency"]:
                 data = df[col].dropna()
@@ -702,6 +737,7 @@ def multi_csv_merge_ui(max_files: int = 5):
 
     if not uploaded_files:
         st.session_state.pop("final_df", None)
+        st.session_state.pop("final_df_version", None)
         return
 
     if len(uploaded_files) > max_files:
@@ -742,8 +778,13 @@ def multi_csv_merge_ui(max_files: int = 5):
     if len(dataframes) == 1:
         if st.button("Submit"):
             st.session_state.final_df = dataframes[0]
+            # Bump the version marker so tab2 knows to reset its derived
+            # working state (cleaned copy, metadata, decision tree, etc.)
+            # instead of carrying over stale state from a previously
+            # uploaded file.
+            st.session_state.final_df_version = uuid4().hex
             st.success("File loaded!")
-        return        
+        return
 
     st.subheader("Join configuration")
     join_config = []
@@ -788,6 +829,7 @@ def multi_csv_merge_ui(max_files: int = 5):
                 right_on=cfg["right_on"]
             )
         st.session_state.final_df = merged
+        st.session_state.final_df_version = uuid4().hex
         st.success("Files successfully merged!")
 
 
@@ -804,6 +846,29 @@ with tab2:
 
     if "final_df" in st.session_state:
         df = st.session_state.final_df
+
+        # ⏺️ Reset all state derived from the previously uploaded/merged
+        # file whenever a new one replaces it (final_df_version changes).
+        # Without this, uploading a new file over an old one left
+        # st.session_state.df (the Custom-Cleaning-via-LLM working copy),
+        # metadata_df, and the decision-tree state pointing at the OLD
+        # file's data — so every subsequent tab2 action silently kept
+        # operating on stale data even though the preview showed the new
+        # file, and column lookups (e.g. metadata_df["Column"]) could
+        # KeyError against the new file's different columns.
+        current_version = st.session_state.get("final_df_version")
+        if st.session_state.get("_final_df_seen_version") != current_version:
+            st.session_state["_final_df_seen_version"] = current_version
+            st.session_state.df = df.copy()
+            st.session_state.pop("metadata_df", None)
+            st.session_state["show_tree"] = False
+            st.session_state["executed_actions"] = set()
+            st.session_state["agraph_tree_data"] = None
+            st.session_state["agraph_leaf_nodes"] = []
+            st.session_state["agraph_col"] = ""
+            st.session_state["agraph_parent_map"] = {}
+            st.session_state["last_executed_click"] = ""
+            st.session_state["last_executed_code"] = ""
 
         # ⏺️ Session setup for logging
         if "session_id" not in st.session_state:
@@ -1015,6 +1080,16 @@ with tab2:
                             }
                             st.session_state["agraph_leaf_nodes"] = response["leaves"]
                             st.session_state["agraph_col"] = selected_col
+                            # Build child->parent lookup from the tree edges
+                            # so a leaf click below can walk back up to its
+                            # ancestor branch. This was previously never
+                            # populated, so every click's LLM instruction
+                            # silently lost the branch context (e.g. "Start
+                            # -> Handle Missing -> Drop Rows") and only ever
+                            # sent the leaf's own label.
+                            st.session_state["agraph_parent_map"] = {
+                                edge.target: edge.source for edge in response["edges"]
+                            }
                             log_event(st.session_state.session_id, "agraph_tree_generated", f"Tree for {selected_col}")
 
                         else:
