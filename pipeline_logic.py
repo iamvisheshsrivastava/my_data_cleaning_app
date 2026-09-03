@@ -108,8 +108,22 @@ def impute_missing(data: pd.DataFrame, params: ImputeMissingValuesParams) -> pd.
         imputer = SimpleImputer(strategy=strategy, fill_value=fill_value)
         data[numeric_cols] = imputer.fit_transform(data[numeric_cols])
     elif strategy == "most_frequent":
-        imputer = SimpleImputer(strategy=strategy)
-        data[data.columns] = imputer.fit_transform(data)
+        # Impute numeric and non-numeric columns as two separate groups
+        # rather than the whole frame at once. SimpleImputer.fit_transform
+        # on a DataFrame with mixed dtypes returns a single homogeneous
+        # numpy array (dtype=object), and assigning that back into
+        # data[data.columns] silently casts EVERY column — including
+        # originally-numeric ones — to object dtype. That corrupts any
+        # later pipeline step relying on select_dtypes(include=np.number)
+        # (Normalize, Scale, Binarize, Remove Outliers, Add Noise, SMOTE,
+        # Oversample, Undersample all use it): numeric_cols comes back
+        # empty and the step silently no-ops or raises a confusing sklearn
+        # error instead of doing what the user asked.
+        other_cols = [c for c in data.columns if c not in numeric_cols]
+        if len(numeric_cols) > 0:
+            data[numeric_cols] = SimpleImputer(strategy=strategy).fit_transform(data[numeric_cols])
+        if other_cols:
+            data[other_cols] = SimpleImputer(strategy=strategy).fit_transform(data[other_cols])
     else:
         raise ValueError(f"Unsupported imputation strategy: {strategy}")
     return data
