@@ -131,7 +131,7 @@ Choose one from the following:
 Reply with only one of the above types.
 """
     try:
-        response = requests.post(LLM.config.API_URL, json={"prompt": prompt}, verify=False)
+        response = requests.post(LLM.config.API_URL, json={"prompt": prompt})
         if response.status_code == 200:
             result = response.json().get("response", "").strip()
             return result
@@ -474,14 +474,22 @@ PROMPT LENGTH (characters): {len(user_instruction) + len(formatted_df)}
             "RandomOverSampler": RandomOverSampler,
             "RandomUnderSampler": RandomUnderSampler,
             "nltk": nltk,
-            "geopy": __import__("geopy"),  
+            "geopy": __import__("geopy"),
             "geodesic": geodesic,
             # Fall back to an empty set if the NLTK corpus is unavailable.
             "stops": ENGLISH_STOPWORDS,
             "word_tokenize": word_tokenize,
-            "transformers": __import__("transformers"),
             "tldextract": tldextract
         }
+
+        # transformers/torch are intentionally excluded from requirements-prod.txt
+        # (nothing in the app itself needs them), so only expose it to
+        # LLM-generated code when it's actually installed rather than importing
+        # it unconditionally on every call and crashing on the prod deployment.
+        try:
+            global_vars["transformers"] = __import__("transformers")
+        except ImportError:
+            pass
 
         local_vars = {"df": df.copy()}
 

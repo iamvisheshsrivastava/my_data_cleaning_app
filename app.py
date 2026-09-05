@@ -876,19 +876,26 @@ with tab2:
 
         log_session(st.session_state.session_id)
 
-        # ⏺️ Save uploaded file to audit directory
-        AUDIT_DIR = Path(__file__).resolve().parent / "DB" / "auditCSVFiles"
-        AUDIT_DIR.mkdir(parents=True, exist_ok=True)
+        # ⏺️ Save uploaded file to audit directory — once per distinct upload.
+        # Streamlit reruns this whole script on every widget interaction, so
+        # without this guard the same file got written to disk again on every
+        # slider drag / checkbox toggle / keystroke, filling the disk within
+        # minutes of routine use (issue #10).
+        if st.session_state.get("_audit_saved_version") != current_version:
+            st.session_state["_audit_saved_version"] = current_version
 
-        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-        filename = f"uploaded_{timestamp}_{st.session_state.session_id[:8]}.csv"
-        file_path = AUDIT_DIR / filename
+            AUDIT_DIR = Path(__file__).resolve().parent / "DB" / "auditCSVFiles"
+            AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 
-        df.to_csv(file_path, index=False)
+            timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            filename = f"uploaded_{timestamp}_{st.session_state.session_id[:8]}.csv"
+            file_path = AUDIT_DIR / filename
 
-        # ⏺️ Log file save and event
-        log_file(st.session_state.session_id, filename, str(file_path))
-        log_event(st.session_state.session_id, "file_upload", f"Saved CSV to {file_path}")
+            df.to_csv(file_path, index=False)
+
+            # ⏺️ Log file save and event
+            log_file(st.session_state.session_id, filename, str(file_path))
+            log_event(st.session_state.session_id, "file_upload", f"Saved CSV to {file_path}")
 
         st.subheader("Preview of Uploaded Data")
         num_rows = st.slider("Rows to display", min_value=5, max_value=len(df), value=10, key="metadata_preview_rows")

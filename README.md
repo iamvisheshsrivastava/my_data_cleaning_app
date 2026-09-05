@@ -1,13 +1,8 @@
 # Smart CSV Toolkit — LLM‑Assisted CSV Cleaning & Metadata Inference
 
-**Live demo → https://smart-csv-toolkit.onrender.com/**
+**Live demo → https://smart-csv-toolkit.onrender.com/** (free-tier Render instance, so the first load after idle can take 30-60s to spin up)
 
-A Streamlit app that helps you **clean CSVs, infer column semantics, merge multiple files, and generate visualizations**. It’s designed to be practical and auditable: you always see the code an LLM proposes, you can accept/reject steps, and your actions are **logged to SQLite**.
-
-## Results / Impact
-- Speeds up exploratory data cleaning with guided, executable steps
-- Produces auditable, repeatable pipelines (all actions logged)
-- Reduces trial-and-error by surfacing concrete cleaning code and visuals
+A Streamlit app for cleaning messy CSVs, figuring out what's actually in each column, merging multiple files, and generating plots without writing pandas by hand every time. I built this mostly to stop rewriting the same `df.dropna()` / dtype-coercion boilerplate for every one-off dataset — an LLM proposes the cleaning code, you read it before it runs, and every action gets logged to SQLite so you can see what happened after the fact.
 
 > **TL;DR**
 > • **Tab 1 – CSV Cleaner:** choose built‑in steps from `table_steps.json`, get **LLM suggestions**, optionally apply **LLM‑generated Python code** (shown before execution), and download the cleaned CSV.
@@ -16,7 +11,7 @@ A Streamlit app that helps you **clean CSVs, infer column semantics, merge multi
 
 ---
 
-## ✨ Features
+## Features
 
 * **Guided CSV Cleaning**
 
@@ -58,11 +53,11 @@ A Streamlit app that helps you **clean CSVs, infer column semantics, merge multi
 
 * **Optional Custom LLM API**
 
-  * Query your own model endpoint (e.g., DeepSeek Coder) via `LLM/config.py`
+  * `LLM/config.py` can point the type-inference fallback at your own model endpoint instead of OpenRouter, if you're running something locally (e.g. DeepSeek Coder behind a small FastAPI wrapper)
 
 ---
 
-## 🗂️ Repository Layout
+## Repository Layout
 
 ```
 my_data_cleaning_app/
@@ -75,7 +70,7 @@ my_data_cleaning_app/
 │  ├─ log_to_db.py            # log_session, log_file, log_event (SQLite)
 │  └─ auditCSVFiles/          # audit folder for saved CSVs (created at runtime)
 ├─ LLM/
-│  └─ config.py               # your custom LLM API endpoint config
+│  └─ config.py               # custom LLM endpoint (fallback type-inference path only)
 ├─ .streamlit/                # Streamlit settings
 ├─ .devcontainer/             # VS Code Dev Container setup
 ├─ requirements.txt           # Python dependencies
@@ -84,7 +79,7 @@ my_data_cleaning_app/
 
 ---
 
-## ⚙️ How It Works (High Level)
+## How It Works (High Level)
 
 1. **Config‑Driven UI** — `table_steps.json` defines sections, step names, descriptions, and typed options. `app.py` renders controls automatically and builds a `steps` list.
 2. **Pipeline Execution** — `pipeline_logic.run_pipeline(df, steps)` executes selected steps in order. If an LLM instruction was accepted, its generated code is appended as a step and executed safely within the pipeline wrapper.
@@ -94,20 +89,20 @@ my_data_cleaning_app/
 
      * generate *cleaning suggestions* (`fetch_llm_suggestions`)
      * translate a *natural instruction* → **raw Python code** (`get_cleaning_code_from_llm`)
-   * A separate **custom LLM API** block posts to `LLM.config.API_URL`.
+   * `fallback_infer_type_with_llm()` posts to the endpoint in `LLM.config.API_URL` as a secondary type-inference path when the heuristics are unsure.
 4. **Metadata Inference & Visuals** — `metadata_inference.analyze_dataframe(df)` infers types and suggests basic visualizations; URL columns can be summarized via an LLM.
 5. **Decision Tree** — `cleaningDecisionTree.render_agraph_tree()` builds a compact action tree (max branching/leaf count). Clicking a **leaf** triggers `custom_cleaning_via_llm()` with contextual instruction; code and results are shown.
 6. **Auditability** — All key actions are logged via `log_session`, `log_file`, and `log_event`. CSVs are saved to an audit directory with timestamp and session id.
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1) Clone & Create Environment
 
 ```bash
-git clone https://github.com/iamvisheshsrivastava/my_data_cleaning_app.git
-cd my_data_cleaning_app
+git clone https://github.com/iamvisheshsrivastava/Smart_CSV_Toolkit.git
+cd Smart_CSV_Toolkit
 
 # (recommended) Python 3.10+ virtual env
 python -m venv .venv
@@ -144,17 +139,14 @@ export OPENROUTER_API_KEY="YOUR_KEY"
 
 The model defaults to `z-ai/glm-4.6` and can be overridden with the `OPENROUTER_MODEL` environment variable.
 
-**Custom LLM endpoint (used by the bottom "Custom Trained LLM via API" section)**
-
-Create/adjust `LLM/config.py` (already present in the repo). Example:
+**Custom LLM endpoint (used only as a fallback for type inference, `LLM/config.py`)**
 
 ```python
 # LLM/config.py
-API_URL = "http://localhost:9000/generate"  # your FastAPI/Flask inference endpoint
-# If you need headers/auth, modify app.py where requests.post is called.
+API_URL = os.getenv("CUSTOM_LLM_API_URL", "http://localhost:9000/generate")
 ```
 
-> The app posts `{ "prompt": "..." }` to `API_URL` and expects `{ "response": "..." }` in return. SSL verification is disabled in that call by default (`verify=False`).
+This was originally meant to power a separate "Custom Trained LLM via API" panel too, but that panel was quietly pointed at `localhost:9000` in production and just failed every time — it's since been switched over to the same OpenRouter client as everything else (`call_llm()`). The only thing that still hits `CUSTOM_LLM_API_URL` is the type-inference fallback in `metadata_inference.py`, and it degrades to `"Text"` if that request fails, so leaving it unset is harmless.
 
 ### 3) Audit Folder Path
 
@@ -186,7 +178,7 @@ The browser test launches Streamlit locally, uploads a sample CSV, enables a bui
 
 ---
 
-## 🧩 Usage Guide
+## Usage Guide
 
 ### Tab 1 — **CSV Cleaner**
 
@@ -221,12 +213,12 @@ The browser test launches Streamlit locally, uploads a sample CSV, enables a bui
 
 ### "Custom Trained LLM via API" (footer section)
 
-* Free‑form prompt UI that posts to `LLM.config.API_URL`.
+* Free‑form prompt box, always visible below the tabs. Despite the name it now runs through the same OpenRouter/GLM‑4.6 client as the rest of the app rather than a separately hosted model — the original self‑hosted-endpoint version never worked in production, so this got consolidated.
 * Response is shown in a text area with timing info.
 
 ---
 
-## 🧱 `table_steps.json` (UI Config)
+## `table_steps.json` (UI Config)
 
 A minimal example to illustrate the shape (your file may be richer):
 
@@ -259,7 +251,7 @@ Each `option` supports `data_type` (`int`, `float`, `str`, `select`) and optiona
 
 ---
 
-## 🧾 Audit Logging
+## Audit Logging
 
 * **Session**: A unique `session_id` is created (`uuid4`).
 * **CSV Save**: After upload/merge, the app writes to the audit folder:
@@ -270,31 +262,32 @@ Each `option` supports `data_type` (`int`, `float`, `str`, `select`) and optiona
 
 ---
 
-## 🔐 Security & Safety
+## Security & Safety
 
-* **Review before execution**: LLM‑generated code is shown in the UI; execute only if you trust it.
-* **Network requests**: General URL analysis fetches webpages; avoid unknown or untrusted domains.
+* **Review before execution**: LLM‑generated code is shown in the UI; execute only if you trust it. There's no real sandbox around it yet — see [issue #4](https://github.com/iamvisheshsrivastava/Smart_CSV_Toolkit/issues/4) if you want the details, it's a known gap and the fix is more involved than it looks.
+* **Network requests**: General URL analysis fetches webpages; outbound URLs are checked against a public-IP allowlist to block SSRF against internal/link-local addresses, but that's not the same as trusting arbitrary domains — avoid feeding it links you don't control.
 * **Secrets**: Keep API keys in environment variables or in `.streamlit/secrets.toml` (don't commit them). The OpenRouter client reads `OPENROUTER_API_KEY` from secrets.toml or environment.
-* **SSL**: The custom LLM request uses `verify=False` by default; enable verification for production.
+* **CSV export**: Cells that could be interpreted as spreadsheet formulas (leading `=`, `+`, `-`, `@`) get neutralized on download so a "cleaned" CSV can't turn into a formula-injection payload when someone opens it in Excel/Sheets.
+* **Session isolation**: the vector-memory store used for "recall past cleaning instructions" is scoped per session, not shared globally — an earlier version leaked one user's cleaning code to every other visitor ([#9](https://github.com/iamvisheshsrivastava/Smart_CSV_Toolkit/issues/9)).
 
 ---
 
-## 🧰 Requirements
+## Requirements
 
 * Python **3.10+**
-* See `requirements.txt` for the full list (notably: `streamlit`, `pandas`, `plotly`, `matplotlib`, `seaborn`, `wordcloud`, `beautifulsoup4`, `dtale`, `streamlit-agraph`, `pyvis`, `openai`, `requests`).
+* See `requirements.txt` for the full list (notably: `streamlit`, `pandas`, `plotly`, `matplotlib`, `seaborn`, `wordcloud`, `beautifulsoup4`, `dtale`, `streamlit-agraph`, `pyvis`, `openai`, `requests`). The prod deploy uses the slimmer `requirements-prod.txt` — no `torch`/`transformers`, which trims the Docker image down considerably.
 
 ---
 
-## 🛠️ Development Notes
+## Development Notes
 
 * **VS Code Dev Container**: Open the repo in VS Code → "Reopen in Container" to develop in a preconfigured environment (see `.devcontainer`).
 * **Styling/UX**: Streamlit components, Plotly charts, Matplotlib/Seaborn for custom visuals, AGraph for the interactive tree, and D‑Tale for data exploration.
-* **Windows paths**: The default audit path is Windows‑specific; switch to `pathlib.Path` for portability as shown above.
+* **Paths**: the audit directory is resolved relative to `app.py` with `pathlib`, so it works the same on Windows/macOS/Linux — no more hardcoded `C:\...` paths.
 
 ---
 
-## 🐳 Docker & CI/CD
+## Docker & CI/CD
 
 * This app can run as **one container** because the current codebase is a Streamlit app only.
 * **Live deployment:** hosted on [Render](https://render.com)'s free tier via `render.yaml` + `Dockerfile` — Render auto-redeploys on every push to `main`. The app previously SSH-deployed to a self-hosted DigitalOcean droplet; that droplet has been decommissioned.
@@ -309,30 +302,30 @@ docker compose up --build -d
 
 ---
 
-## 🧩 Troubleshooting
+## Troubleshooting
 
 * *D‑Tale link not opening*: Ensure your browser can reach the host/port D‑Tale binds to; check firewall and proxy; try opening the printed URL directly.
 * *LLM suggestions/code empty or errors*: Confirm `OPENROUTER_API_KEY` is set in `.streamlit/secrets.toml`; ensure your OpenRouter account has credit/quota available; retry with a simpler instruction.
-* *Custom LLM API errors*: Ensure your server at `LLM.config.API_URL` is running and returns `{ "response": "..." }` JSON.
+* *Type-inference fallback errors*: only relevant if you've set `CUSTOM_LLM_API_URL` — make sure that server is running and returns `{ "response": "..." }` JSON. Left unset, it just silently falls back to `"Text"`.
 * *Large CSVs*: If memory is tight, run with a smaller sample or increase system RAM; consider chunked processing in future extensions.
 * *Visualization errors*: Some plots assume valid numeric/datetime parsing; ensure columns are cast or adjust instructions accordingly.
 
 ---
 
-## 🗺️ Roadmap (Ideas)
+## Roadmap (Ideas)
 
-* More robust, non‑LLM type inference heuristics
+* Real sandboxing for LLM‑generated code (`__builtins__ = {}` alone doesn't cut it — see #4)
+* Non‑LLM heuristics for the type-inference fallback, so it degrades better without an API key
+* Undo/history for Tab 2's in‑place cleaning steps (#13)
 * Built‑in CSV join diagnostics and key suggestions
 * Executable cleaning **playback** (export steps as a Python script)
-* Switch to portable audit paths by default; add env‑configurable audit dir
-* Optional sandboxing for LLM‑generated code
 * Multi‑page layout (Cleaner / Inspector / Recipes / Logs)
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Issues and PRs are welcome! Please include a clear description, steps to reproduce, and screenshots/logs where helpful.
+Issues and PRs are welcome. Please include a clear description, steps to reproduce, and screenshots/logs where helpful.
 
 ---
 
