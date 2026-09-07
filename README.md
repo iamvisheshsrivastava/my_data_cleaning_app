@@ -297,7 +297,7 @@ Each `option` supports `data_type` (`int`, `float`, `str`, `select`) and optiona
 docker compose up --build -d
 ```
 
-* The GitHub Actions workflow in `.github/workflows/ci-cd.yml` runs syntax checks on every PR/push. Its SSH-deploy step targets the retired droplet and is no longer functional — actual deployment now happens via Render's own auto-deploy, not this workflow.
+* The GitHub Actions workflow in `.github/workflows/ci-cd.yml` runs syntax checks on every PR/push. The old SSH-deploy job (which targeted the retired droplet) has been removed since it always failed and Render's own auto-deploy already handles deployment.
 * If you later add a FastAPI backend, then splitting into **two containers** makes sense. For now, one container is enough.
 
 ---

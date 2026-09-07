@@ -30,32 +30,7 @@ jobs:
         run: |
           python -m py_compile app.py metadata_inference.py pipeline_logic.py cleaningDecisionTree.py
 
-  deploy:
-    if: github.event_name == 'push'
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to server over SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
-          passphrase: ${{ secrets.DEPLOY_SSH_PASSPHRASE }}
-          envs: OPENROUTER_API_KEY
-          script: |
-            set -e
-            APP_DIR=${{ secrets.DEPLOY_PATH }}
-
-            if [ ! -d "$APP_DIR/.git" ]; then
-              git clone https://github.com/${{ github.repository }}.git "$APP_DIR"
-            fi
-
-            cd "$APP_DIR"
-            git pull
-
-            # Update .env file with latest API key from GitHub Secrets
-            echo "OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}" > .env
-
-            docker compose up -d --build --remove-orphans
+# Deployment happens automatically via Render's own auto-deploy (see render.yaml,
+# autoDeployTrigger: commit) on every push to main. The previous SSH-deploy job here
+# targeted a self-hosted DigitalOcean droplet that has since been decommissioned, so
+# it was removed to stop CI from reporting a false failure on every commit.
