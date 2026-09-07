@@ -11,6 +11,28 @@ A Streamlit app for cleaning messy CSVs, figuring out what's actually in each co
 
 ---
 
+## Screenshots
+
+A quick walkthrough of the CSV Cleaner tab (Tab 1), using a small sample CSV with a missing `age` value, a missing `city`, a missing `signup_date`, and a duplicated row:
+
+**1. Upload a CSV** — drag-and-drop or browse, 25MB limit enforced client-side and server-side.
+
+![Upload CSV](docs/screenshots/01_upload.png)
+
+**2. Preview the raw data** — the app renders the first N rows immediately so you can sanity-check what was uploaded before picking any cleaning steps. Note the missing `age`, `city`, and `signup_date` cells.
+
+![Preview of uploaded data](docs/screenshots/02_preview.png)
+
+**3. Pick a cleaning step** — here, `Impute Missing Values` (strategy: mean) is checked from the config-driven step list defined in `table_steps.json`.
+
+![Selecting the Impute Missing Values step](docs/screenshots/03_steps_selected.png)
+
+**4. Run the pipeline and preview the cleaned result** — the missing `age` values (`None`) have been imputed to the column mean (`226.4`, pulled up by the `999` outlier in the sample — a good illustration of why `Remove Outliers` is a separate, composable step).
+
+![Cleaned data preview after running the pipeline](docs/screenshots/04_cleaned_result.png)
+
+---
+
 ## Features
 
 * **Guided CSV Cleaning**
