@@ -34,10 +34,8 @@ import dateparser
 from dateparser.search import search_dates
 
 from joblib import Parallel, delayed
-import LLM.config
 
 import contextlib
-import requests
 import urllib3
 urllib3.disable_warnings()
 
@@ -131,12 +129,8 @@ Choose one from the following:
 Reply with only one of the above types.
 """
     try:
-        response = requests.post(LLM.config.API_URL, json={"prompt": prompt})
-        if response.status_code == 200:
-            result = response.json().get("response", "").strip()
-            return result
-        else:
-            return "Text"
+        result = call_llm(prompt).strip()
+        return result or "Text"
     except Exception as e:
         print(f"LLM Fallback Error: {e}")
         return "Text"
